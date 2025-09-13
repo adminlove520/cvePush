@@ -1,3 +1,4 @@
 requests
 serverchan_sdk
 python-dotenv
+requests

@@ -31,15 +31,23 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
-          pip install serverchan-sdk
+          pip install -r requirements.txt
           
-      - name: Download previous DB
+      - name: Try to download previous DB
+        id: download-db
         uses: actions/download-artifact@v4
         with:
           name: vulns-db
           path: .  # 下载到工作目录
         continue-on-error: true  # 首次运行时忽略错误
+
+      - name: Create empty DB if download failed
+        if: steps.download-db.outcome == 'failure'
+        run: |
+          # 创建一个空的数据库文件，避免程序因缺少数据库文件而报错
+          echo "Creating empty database file..."
+          python -c "import sqlite3; conn = sqlite3.connect('vulns.db'); conn.close()"
+          echo "Empty database file created successfully."
 
       - name: Run CVE Push Service script
         env:
