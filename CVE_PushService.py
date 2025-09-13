@@ -25,7 +25,9 @@ SCKEY = os.getenv("SCKEY")
 DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK")
 DINGTALK_SECRET = os.getenv("DINGTALK_SECRET")  # 钉钉加签密钥
 EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER")
-EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
+# 更健壮地处理EMAIL_SMTP_PORT，避免空字符串转换错误
+EMAIL_SMTP_PORT_VALUE = os.getenv("EMAIL_SMTP_PORT", "587")
+EMAIL_SMTP_PORT = int(EMAIL_SMTP_PORT_VALUE) if EMAIL_SMTP_PORT_VALUE.strip() else 587
 EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
@@ -64,14 +66,29 @@ logger.addHandler(file_handler)
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS vulns
-                 (id TEXT PRIMARY KEY, 
-                  published_date TEXT, 
-                  cvss_score REAL, 
-                  description TEXT, 
-                  vector_string TEXT,
-                  refs TEXT,
-                  source TEXT)''')
+    # 检查表是否存在
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vulns'")
+    table_exists = c.fetchone() is not None
+    
+    if not table_exists:
+        # 创建表（新表）
+        c.execute('''CREATE TABLE IF NOT EXISTS vulns
+                     (id TEXT PRIMARY KEY, 
+                      published_date TEXT, 
+                      cvss_score REAL, 
+                      description TEXT, 
+                      vector_string TEXT,
+                      refs TEXT,
+                      source TEXT,
+                      tags TEXT)''')
+    else:
+        # 检查表是否有tags列
+        c.execute("PRAGMA table_info(vulns)")
+        columns = [column[1] for column in c.fetchall()]
+        if 'tags' not in columns:
+            # 添加tags列
+            c.execute("ALTER TABLE vulns ADD COLUMN tags TEXT")
+    
     conn.commit()
     conn.close()
 
@@ -159,6 +176,71 @@ def parse_cve_item(cve_item):
 
         refs = "\n".join([ref.get('url', '') for ref in cve_data.get('references', [])][:3])
 
+        # 提取漏洞分类标签
+        tags = []
+        if 'problemTypes' in cve_data:
+            for problem_type in cve_data['problemTypes']:
+                if 'descriptions' in problem_type:
+                    for desc in problem_type['descriptions']:
+                        if desc.get('lang') == 'en':
+                            # 提取CWE信息
+                            cwe_text = desc.get('value', '').strip()
+                            if cwe_text.startswith('CWE-'):
+                                cwe_id = cwe_text.split(' ', 1)[0]
+                                tags.append(cwe_id)
+                                
+                                # 添加对应的中文标签
+                                cwe_mapping = {
+                                    'CWE-20': '输入验证不当',
+                                    'CWE-78': '命令注入',
+                                    'CWE-89': 'SQL注入',
+                                    'CWE-352': '跨站请求伪造',
+                                    'CWE-79': '跨站脚本',
+                                    'CWE-434': '不安全文件上传',
+                                    'CWE-287': '身份验证绕过',
+                                    'CWE-22': '路径遍历',
+                                    'CWE-362': '竞争条件',
+                                    'CWE-476': '空指针解引用',
+                                    'CWE-119': '缓冲区溢出',
+                                    'CWE-120': '缓冲区溢出',
+                                    'CWE-502': '反序列化漏洞',
+                                    'CWE-269': '权限提升',
+                                    'CWE-400': '资源耗尽',
+                                    'CWE-770': '资源耗尽',
+                                    'CWE-918': '服务器端请求伪造',
+                                    'CWE-123': '写入错误',
+                                    'CWE-134': '格式化字符串漏洞',
+                                    'CWE-190': '整数溢出',
+                                    'CWE-250': '特权提升',
+                                    'CWE-306': '缺少身份验证',
+                                    'CWE-319': '明文传输',
+                                    'CWE-345': '验证不足',
+                                    'CWE-359': '信息泄露',
+                                    'CWE-416': '使用后释放',
+                                    'CWE-426': '未受信任的搜索路径',
+                                    'CWE-434': '不安全文件上传',
+                                    'CWE-522': '凭证暴露',
+                                    'CWE-523': '凭证暴露',
+                                    'CWE-601': '开放重定向',
+                                    'CWE-732': '权限配置错误',
+                                    'CWE-862': '缺少授权',
+                                    'CWE-863': '错误授权',
+                                    'CWE-908': '未初始化变量',
+                                    'CWE-917': '表达式注入',
+                                    'CWE-922': '不安全存储'
+                                }
+                                if cwe_id in cwe_mapping:
+                                    tags.append(cwe_mapping[cwe_id])
+        
+        # 根据CVSS评分添加严重性标签
+        if cvss_score >= 9.0:
+            tags.append('严重')
+        elif cvss_score >= 7.0:
+            tags.append('高危')
+        
+        # 去重并转换为字符串
+        tags_str = ','.join(list(set(tags))) if tags else '未分类'
+
         return {
             'id': cve_id,
             'published_date': cve_data.get('published', 'N/A'),
@@ -166,7 +248,8 @@ def parse_cve_item(cve_item):
             'description': description,
             'vector_string': vector_string,
             'refs': refs,
-            'source': 'NVD'
+            'source': 'NVD',
+            'tags': tags_str
         }
     except KeyError as e:
         logger.error(f"Error parsing CVE item: missing key {str(e)}")
@@ -186,10 +269,22 @@ def save_vuln(vuln_info):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO vulns VALUES (?, ?, ?, ?, ?, ?, ?)",
-                  (vuln_info['id'], vuln_info['published_date'], vuln_info['cvss_score'],
-                   vuln_info['description'], vuln_info['vector_string'],
-                   vuln_info['refs'], vuln_info['source']))
+        # 检查数据库是否有tags列
+        c.execute("PRAGMA table_info(vulns)")
+        columns = [column[1] for column in c.fetchall()]
+        
+        if 'tags' in columns:
+            # 如果有tags列，插入包含tags的完整数据
+            c.execute("INSERT INTO vulns VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      (vuln_info['id'], vuln_info['published_date'], vuln_info['cvss_score'],
+                       vuln_info['description'], vuln_info['vector_string'],
+                       vuln_info['refs'], vuln_info['source'], vuln_info.get('tags', '未分类')))
+        else:
+            # 如果没有tags列，插入不包含tags的数据
+            c.execute("INSERT INTO vulns VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      (vuln_info['id'], vuln_info['published_date'], vuln_info['cvss_score'],
+                       vuln_info['description'], vuln_info['vector_string'],
+                       vuln_info['refs'], vuln_info['source']))
         conn.commit()
     except sqlite3.IntegrityError:
         pass
@@ -198,9 +293,31 @@ def save_vuln(vuln_info):
 
 # 生成通知内容
 def generate_notification_content(vuln_info):
+    # 在标题中添加严重程度标签（如果有）
     title = f"高危漏洞: {vuln_info['id']} ({vuln_info['cvss_score']})"
+    if 'tags' in vuln_info and vuln_info['tags']:
+        tags = vuln_info['tags'].split(',')
+        # 检查是否有'严重'或'高危'标签
+        for tag in tags:
+            if tag in ['严重', '高危']:
+                title = f"{tag}漏洞: {vuln_info['id']} ({vuln_info['cvss_score']})"
+                break
 
     translated_description = translate(vuln_info['description'])
+
+    # 在描述中添加标签信息
+    tags_section = """
+## 漏洞分类
+{vuln_tags}
+"""
+    
+    if 'tags' in vuln_info and vuln_info['tags'] and vuln_info['tags'] != '未分类':
+        # 将逗号分隔的标签转换为列表并格式化显示
+        tags_list = vuln_info['tags'].split(',')
+        formatted_tags = "、".join(tags_list)
+        tags_section = tags_section.format(vuln_tags=formatted_tags)
+    else:
+        tags_section = ""
 
     desp = f"""
 ## 漏洞详情
@@ -208,6 +325,8 @@ def generate_notification_content(vuln_info):
 **发布时间**: {vuln_info['published_date']}  
 **CVSS分数**: {vuln_info['cvss_score']}  
 **攻击向量**: {vuln_info['vector_string']}  
+
+{vulnerability_tags}
 
 ## 漏洞描述
 {translated_description}
@@ -217,7 +336,10 @@ def generate_notification_content(vuln_info):
 
 ## 来源
 {vuln_info['source']}
-"""
+"""    
+    
+    # 替换描述中的标签部分
+    desp = desp.replace("{vulnerability_tags}", tags_section)
     
     return title, desp
 
@@ -353,17 +475,29 @@ def get_today_vulnerabilities():
     today_str = today.strftime('%Y-%m-%d')
     tomorrow_str = tomorrow.strftime('%Y-%m-%d')
     
-    # 查询今天添加的漏洞
-    c.execute("""
-        SELECT id, published_date, cvss_score, description, vector_string, refs, source 
-        FROM vulns 
-        WHERE published_date >= ? AND published_date < ?
-        ORDER BY cvss_score DESC
-    """, (today_str, tomorrow_str))
+    # 检查数据库是否有tags列
+    c.execute("PRAGMA table_info(vulns)")
+    columns = [column[1] for column in c.fetchall()]
+    
+    # 根据是否有tags列选择不同的查询语句
+    if 'tags' in columns:
+        c.execute("""
+            SELECT id, published_date, cvss_score, description, vector_string, refs, source, tags 
+            FROM vulns 
+            WHERE published_date >= ? AND published_date < ?
+            ORDER BY cvss_score DESC
+        """, (today_str, tomorrow_str))
+    else:
+        c.execute("""
+            SELECT id, published_date, cvss_score, description, vector_string, refs, source 
+            FROM vulns 
+            WHERE published_date >= ? AND published_date < ?
+            ORDER BY cvss_score DESC
+        """, (today_str, tomorrow_str))
     
     vulns = []
     for row in c.fetchall():
-        vulns.append({
+        vuln_dict = {
             'id': row[0],
             'published_date': row[1],
             'cvss_score': row[2],
@@ -371,7 +505,12 @@ def get_today_vulnerabilities():
             'vector_string': row[4],
             'refs': row[5],
             'source': row[6]
-        })
+        }
+        # 如果查询结果包含tags列，则添加tags字段
+        if len(row) > 7:
+            vuln_dict['tags'] = row[7]
+        
+        vulns.append(vuln_dict)
     
     conn.close()
     return vulns
@@ -443,11 +582,18 @@ def generate_vulnerability_report(vulns):
 def generate_vuln_markdown(vuln_info):
     translated_description = translate(vuln_info['description'])
     
+    # 准备标签部分的markdown
+    tags_section = ""
+    if 'tags' in vuln_info and vuln_info['tags'] and vuln_info['tags'] != '未分类':
+        tags_list = vuln_info['tags'].split(',')
+        formatted_tags = "、".join(tags_list)
+        tags_section = f"\n**漏洞分类**: {formatted_tags}\n"
+    
     return f"""
 ### {vuln_info['id']} - CVSS: {vuln_info['cvss_score']}
 
 **发布时间**: {vuln_info['published_date']}
-**攻击向量**: {vuln_info['vector_string']}
+**攻击向量**: {vuln_info['vector_string']}{tags_section}
 
 #### 漏洞描述
 {translated_description}
