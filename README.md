@@ -90,13 +90,9 @@
 
 ### 注意
 
-- 默认是每天早上 **北京时间 7:30**左右开始自动检测**24小时**内是否有新的高危漏洞曝出，如果您想修改，可以在AutoCVE.yml中修改。实际执行时间：每天上午 ≈7:00~8:00（受GitHub队列影响）
-- 由于本项目中使用 `GitHub Actions` 的 `Artifact` 来存储数据库（vulns.db）。`Artifact`是存储在GitHub仓库的`Actions`页面下的，与代码仓库分离。因此，当你们fork项目时，只能复制代码，但不会复制`Artifact`。这意味着：
-  - 每个fork的项目在首次运行时，由于没有历史数据库，会从头开始创建一个新的`vulns.db`。（APP可能会收到24小时内的多条通知，不要惊慌）
-  - 每个fork的项目在后续运行中，会使用自己工作流生成的`Artifact`（即自己保存的数据库），不会互相影响。
-- 运行方式：
-   - 启动 Action 时自动首次触发，后续工作流会在每日北京时间 7:30 左右自动运行
-   - 或手动触发测试：Actions → Auto CVE Monitor → Run workflow
+   
+- 请确保在仓库的`Settings`→`Actions`→`General`→`Workflow permissions`中开启**Read and write permissions**，以确保release报告的拉取和发布功能正常运行，避免出现403权限错误。
+
 ---
 
 <p align="center">⚡ 如果本项目对你有帮助，请点一个 ⭐ Star 支持作者！</p> 
