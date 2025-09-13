@@ -1,6 +1,7 @@
 # coding=utf-8
 import sys
 import smtplib
+import time
 from email.mime.text import MIMEText
 from email.header import Header
 
@@ -17,7 +18,7 @@ import sqlite3
 import logging
 import calendar
 from logging.handlers import TimedRotatingFileHandler
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from serverchan_sdk import sc_send
 
 # 基本配置
@@ -96,19 +97,79 @@ def init_db():
 def get_current_year():
     return datetime.now().year
 
-# 有道翻译API
+# 翻译函数（支持有道和Google翻译API容灾）
 def translate(text):
-    url = 'https://aidemo.youdao.com/trans'
-    try:
-        data = {"q": text, "from": "auto", "to": "zh-CHS"}
-        resp = requests.post(url, data, timeout=15)
-        if resp is not None and resp.status_code == 200:
-            respJson = resp.json()
-            if "translation" in respJson:
-                return "\n".join(str(i) for i in respJson["translation"])
-    except Exception:
-        logger.warning("Error translating message!")
-    return text
+    # 主翻译API：有道翻译
+    def youdao_translate(text):
+        url = 'https://aidemo.youdao.com/trans'
+        max_retries = 2
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            try:
+                data = {"q": text, "from": "auto", "to": "zh-CHS"}
+                resp = requests.post(url, data, timeout=15)
+                if resp is not None and resp.status_code == 200:
+                    respJson = resp.json()
+                    if "translation" in respJson:
+                        return "\n".join(str(i) for i in respJson["translation"])
+                else:
+                    logger.warning(f"有道翻译API返回非200状态码: {resp.status_code if resp else '无响应'}, 尝试第{retry_count+1}次重试...")
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"有道翻译API连接错误: {str(e)}, 尝试第{retry_count+1}次重试...")
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"有道翻译API请求超时: {str(e)}, 尝试第{retry_count+1}次重试...")
+            except ValueError as e:
+                logger.warning(f"有道翻译API返回格式错误: {str(e)}")
+                break  # JSON解析错误不需要重试
+            except Exception as e:
+                logger.warning(f"有道翻译消息时发生错误: {str(e)}")
+            
+            retry_count += 1
+            if retry_count <= max_retries:
+                time.sleep(1)  # 重试间隔1秒
+        
+        return None  # 所有重试都失败时返回None
+    
+    # 备用翻译API：Google翻译
+    def google_translate(text):
+        url = 'https://translate.googleapis.com/translate_a/single'
+        params = {
+            'client': 'gtx',
+            'sl': 'auto',  # 源语言自动检测
+            'tl': 'zh-CN',  # 目标语言为中文
+            'dt': 't',
+            'q': text
+        }
+        
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            if resp.status_code == 200:
+                respJson = resp.json()
+                if respJson and isinstance(respJson, list):
+                    # Google翻译API返回的结构需要解析
+                    translated_text = ''.join([item[0] for item in respJson[0] if item and item[0]])
+                    return translated_text
+        except Exception as e:
+            logger.warning(f"Google翻译API错误: {str(e)}")
+        
+        return None  # 失败时返回None
+    
+    # 首先尝试使用有道翻译API
+    logger.info("使用有道翻译API进行翻译...")
+    translated_text = youdao_translate(text)
+    
+    # 如果有道翻译API失败，尝试使用Google翻译API
+    if translated_text is None:
+        logger.info("有道翻译API失败，尝试使用Google翻译API进行容灾...")
+        translated_text = google_translate(text)
+    
+    # 如果所有翻译API都失败，返回原文
+    if translated_text is None or translated_text.strip() == '':
+        logger.warning("所有翻译API都失败，返回原文")
+        return text
+    
+    return translated_text
 
 # 从NVD获取CVE数据
 def fetch_nvd_data(use_recent=True):
@@ -133,8 +194,9 @@ def fetch_nvd_data(use_recent=True):
 # 检查漏洞是否在最近24小时内发布
 def is_recent(published_date_str):
     try:
-        published_dt = datetime.strptime(published_date_str, "%Y-%m-%dT%H:%M:%S.%f")
-        time_diff = datetime.utcnow() - published_dt
+        # 将发布日期转换为UTC时区感知的datetime对象
+        published_dt = datetime.strptime(published_date_str, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=UTC)
+        time_diff = datetime.now(UTC) - published_dt
         return time_diff.total_seconds() <= 24 * 3600
     except Exception as e:
         logger.error(f"Failed to parse date {published_date_str}: {str(e)}")
@@ -248,7 +310,7 @@ def parse_cve_item(cve_item):
             'description': description,
             'vector_string': vector_string,
             'refs': refs,
-            'source': 'NVD',
+            'source': 'NVD (National Vulnerability Database)',
             'tags': tags_str
         }
     except KeyError as e:
@@ -319,14 +381,13 @@ def generate_notification_content(vuln_info):
     else:
         tags_section = ""
 
+    # 优化markdown格式，使其与daily.md风格一致
     desp = f"""
 ## 漏洞详情
-**CVE ID**: {vuln_info['id']}  
-**发布时间**: {vuln_info['published_date']}  
-**CVSS分数**: {vuln_info['cvss_score']}  
-**攻击向量**: {vuln_info['vector_string']}  
-
-{vulnerability_tags}
+**CVE ID**: {vuln_info['id']}
+**发布时间**: {vuln_info['published_date']}
+**CVSS分数**: {vuln_info['cvss_score']}
+**攻击向量**: {vuln_info['vector_string']}
 
 ## 漏洞描述
 {translated_description}
@@ -336,10 +397,12 @@ def generate_notification_content(vuln_info):
 
 ## 来源
 {vuln_info['source']}
-"""    
-    
-    # 替换描述中的标签部分
-    desp = desp.replace("{vulnerability_tags}", tags_section)
+
+{tags_section}
+
+---
+*本通知由 CVE Push Service 自动生成*
+"""
     
     return title, desp
 
@@ -468,7 +531,7 @@ def get_today_vulnerabilities():
     c = conn.cursor()
     
     # 计算今天的日期范围（UTC时间）
-    today = datetime.utcnow().date()
+    today = datetime.now(UTC).date()
     tomorrow = today + timedelta(days=1)
     
     # 格式化日期字符串
@@ -518,7 +581,7 @@ def get_today_vulnerabilities():
 # 获取周数和日期格式
 def get_week_date_format(date=None):
     if date is None:
-        date = datetime.utcnow().date()
+        date = datetime.now(UTC).date()
     
     # 获取年份
     year = date.strftime('%Y')
@@ -539,8 +602,8 @@ def create_directory_structure(dir_path):
 
 # 生成漏洞报告markdown
 def generate_vulnerability_report(vulns):
-    today = datetime.utcnow().strftime('%Y年%m月%d日')
-    report_date = datetime.utcnow().strftime('%Y-%m-%d')
+    today = datetime.now(UTC).strftime('%Y年%m月%d日')
+    report_date = datetime.now(UTC).strftime('%Y-%m-%d')
     
     markdown_content = f"""
 # {today} 高危漏洞日报

@@ -1,6 +1,6 @@
-# CVE_PushService 本地测试指南
+# CVE_Push 本地测试指南
 
-本指南将帮助您在本地环境中测试和运行 CVE_PushService 项目。
+本指南将帮助您在本地环境中测试和运行 CVE_Push 项目。
 
 ## 📋 环境准备
 
@@ -189,7 +189,7 @@ file_handler.setLevel(logging.DEBUG)
 
 ## 📝 注意事项
 
-- 本地测试时，由于有道翻译 API 的限制，频繁调用可能会导致翻译失败
+- 本地测试时，系统会首先使用有道翻译 API，如有失败会自动切换到Google翻译API作为备份
 - 如果您不需要某种推送方式，可以不配置相应的环境变量
 - 本地运行时，生成的报告将保存在项目目录下的 `data` 文件夹中
 - 测试完成后，建议删除临时配置的敏感信息（如邮箱密码等）
@@ -201,6 +201,7 @@ file_handler.setLevel(logging.DEBUG)
 ```
 requests
 serverchan_sdk
+python-dotenv
 ```
 
 这样就可以使用 `pip install -r requirements.txt` 一键安装所有依赖。
