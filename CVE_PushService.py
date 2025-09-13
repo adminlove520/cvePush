@@ -448,25 +448,42 @@ def send_dingtalk_notification(vuln_info):
         
         # 如果配置了加签密钥，则生成签名
         if DINGTALK_SECRET:
-            # 获取当前时间戳（毫秒级）
+            # 严格按照钉钉官方文档实现签名生成逻辑
+            # 1. 获取当前时间戳（毫秒级）
             timestamp = str(round(time.time() * 1000))
-            # 拼接时间戳和密钥
+            # 2. 拼接时间戳和密钥，格式为：timestamp + '\n' + secret
             secret_enc = DINGTALK_SECRET.encode('utf-8')
             string_to_sign = '{}\n{}'.format(timestamp, DINGTALK_SECRET)
             string_to_sign_enc = string_to_sign.encode('utf-8')
-            # 使用HmacSHA256算法计算签名
+            # 3. 使用HmacSHA256算法计算签名
             hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
-            # 对签名进行Base64编码
+            # 4. 对签名进行Base64编码
             sign = base64.b64encode(hmac_code).decode('utf-8')
-            # 对Base64编码后的签名进行URL编码，修复签名不匹配问题
+            # 5. 对Base64编码后的签名进行URL编码，确保特殊字符正确处理
             import urllib.parse
             sign_encoded = urllib.parse.quote_plus(sign)
-            # 将时间戳和签名添加到URL中
-            if '?' in webhook_url:
-                webhook_url = f"{webhook_url}&timestamp={timestamp}&sign={sign_encoded}"
-            else:
-                webhook_url = f"{webhook_url}?timestamp={timestamp}&sign={sign_encoded}"
-            logger.info("已启用钉钉加签验证")
+            # 6. 确保webhook_url不包含现有的timestamp和sign参数
+            # 解析URL，移除可能存在的timestamp和sign参数
+            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            parsed_url = urlparse(webhook_url)
+            query_params = parse_qs(parsed_url.query)
+            # 删除已有的timestamp和sign参数
+            query_params.pop('timestamp', None)
+            query_params.pop('sign', None)
+            # 添加新的timestamp和sign参数
+            query_params['timestamp'] = [timestamp]
+            query_params['sign'] = [sign_encoded]
+            # 重建URL
+            new_query = urlencode(query_params, doseq=True)
+            webhook_url = urlunparse((
+                parsed_url.scheme,
+                parsed_url.netloc,
+                parsed_url.path,
+                parsed_url.params,
+                new_query,
+                parsed_url.fragment
+            ))
+            logger.info(f"已启用钉钉加签验证，时间戳: {timestamp}")
         
         response = requests.post(webhook_url, headers=headers, data=json.dumps(data), timeout=15)
         response_json = response.json()
