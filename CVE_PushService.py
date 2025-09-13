@@ -392,8 +392,11 @@ def generate_notification_content(vuln_info):
     desp = f"""
 ## 漏洞详情
 **CVE ID**: {vuln_info['id']}
+
 **发布时间**: {vuln_info['published_date']}
+
 **CVSS分数**: {vuln_info['cvss_score']}
+
 **攻击向量**: {vuln_info['vector_string']}
 
 ## 漏洞描述
