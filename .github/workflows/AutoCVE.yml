@@ -53,6 +53,7 @@ jobs:
         env:
           SCKEY: ${{ secrets.SCKEY }}   # 从 GitHub Secrets 注入
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}  # 添加钉钉加签密钥
           EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
           EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
           EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
