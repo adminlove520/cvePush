@@ -1,0 +1,67 @@
+# 日志文件
+*.log
+*.log.*
+cveflows.log
+
+# 数据库文件
+*.db
+vulns.db
+
+# 环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Python编译文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python包和依赖
+*.egg
+*.egg-info/
+dist/
+build/
+*.egg/
+
+# 本地安装的Python包
+.pip/
+.pipenv/
+venv/
+.env/
+
+# 测试文件
+.pytest_cache/
+.coverage
+coverage.xml
+
+# IDE配置文件
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 其他临时文件
+*.tmp
+*.temp
+*.bak
+*.old
+*.swp
+
+# 报告和数据目录
+data/
+
+# 标志文件
+new_vulns.flag

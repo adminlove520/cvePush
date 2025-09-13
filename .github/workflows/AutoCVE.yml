@@ -1,0 +1,127 @@
+name: Auto CVE Push Service
+
+on:
+  schedule:
+    - cron: '0 23 * * *'   # 每天 23 点执行（UTC 时间）（实测执行时间可能会因为GitHub Actions的队列延迟而延后，如果在东八区，相当于北京时间上午 7-8 点，一个小时左右属于正常的波动范围）
+  workflow_dispatch:       # 手动触发
+    inputs:
+      push_mode:
+        description: '推送模式选择: all - 所有推送方式, serverchan - Server酱, dingtalk - 钉钉, email - 邮件'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - serverchan
+          - dingtalk
+          - email
+
+jobs:
+  run-cveflows:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+          pip install serverchan-sdk
+          
+      - name: Download previous DB
+        uses: actions/download-artifact@v4
+        with:
+          name: vulns-db
+          path: .  # 下载到工作目录
+        continue-on-error: true  # 首次运行时忽略错误
+
+      - name: Run CVE Push Service script
+        env:
+          SCKEY: ${{ secrets.SCKEY }}   # 从 GitHub Secrets 注入
+          DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          PUSH_MODE: ${{ inputs.push_mode }}
+        run:
+          python CVE_PushService.py
+
+      - name: Check if new vulnerabilities were found
+        id: check_vulns
+        run: |
+          if [ -f new_vulns.flag ]; then
+            echo "new_vulns=true" >> $GITHUB_ENV
+            echo "---- New Vulnerabilities Found ----"
+            cat new_vulns.flag
+            echo "-----------------------------------"
+          else
+            echo "new_vulns=false" >> $GITHUB_ENV
+            echo "No new vulnerabilities."
+          fi
+
+      - name: Upload CVE Push Service log (only if new vulns found)
+        if: env.new_vulns == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cveflows-log
+          path: cveflows.log
+
+      - name: Upload updated DB
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulns-db
+          path: vulns.db  # 上传当前数据库
+          retention-days: 7
+          
+      - name: Upload daily vulnerability report
+        if: env.new_vulns == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-reports
+          path: data/**/*.md  # 上传所有生成的报告文件
+          retention-days: 30
+
+      - name: Generate release tag
+        if: env.new_vulns == 'true'
+        run: |
+          # 生成当日日期格式的tag (YYYY-MM-DD_DailyPush)
+          TODAY=$(date -u +'%Y-%m-%d')
+          RELEASE_TAG="${TODAY}_DailyPush"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+          echo "Generated release tag: ${RELEASE_TAG}"
+
+      - name: Package data directory
+        if: env.new_vulns == 'true'
+        run: |
+          # 确保data目录存在
+          if [ -d "data" ]; then
+            # 打包data目录为tar.gz格式
+            TODAY=$(date -u +'%Y-%m-%d')
+            ARCHIVE_NAME="cve-reports-${TODAY}.tar.gz"
+            tar -czf "${ARCHIVE_NAME}" data/
+            echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+            echo "Packaged data directory into ${ARCHIVE_NAME}"
+          else
+            echo "No data directory found, skipping packaging"
+          fi
+
+      - name: Create GitHub Release
+        if: env.new_vulns == 'true' && env.ARCHIVE_NAME != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "每日漏洞报告 - ${{ env.RELEASE_TAG }}"
+          body: "自动生成的每日漏洞报告，包含当天发现的所有高危漏洞详细信息。"
+          draft: false
+          prerelease: false
+          files: ${{ env.ARCHIVE_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
