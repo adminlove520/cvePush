@@ -90,7 +90,7 @@
 
 ### 注意
 
-   
+
 - 请确保在仓库的`Settings`→`Actions`→`General`→`Workflow permissions`中开启**Read and write permissions**，以确保release报告的拉取和发布功能正常运行，避免出现403权限错误。
 
 ---
