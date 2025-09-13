@@ -60,8 +60,6 @@ Thumbs.db
 *.old
 *.swp
 
-# 报告和数据目录
-data/
 
 # 标志文件
 new_vulns.flag
