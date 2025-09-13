@@ -86,7 +86,6 @@
 - 再次进入 `Actions` 页面，点击 `Auto CVE Push Service` 工作流，检查最近一次运行是否有报错
 - 若运行成功，系统将根据配置的推送方式（Server酱/钉钉/邮箱）发送通知（请确保已开启对应App的通知权限）
 - 系统支持钉钉加签功能，如需启用请在GitHub Secrets中配置`DINGTALK_SECRET`
-- 推送效果示例：
 
 ### 注意
 
@@ -145,7 +144,7 @@ data/YYYY/W-WWDD/daily.md
 - 感谢 [kiang70](https://github.com/kiang70/Github-Monitor/)、[Kira-Pgr](https://github.com/Kira-Pgr/Github-CVE-Listener)两位师傅提供思路。
 - 感谢 [Server酱3](https://sc3.ft07.com/) 提供稳定的消息推送服务。
 - 感谢 [NVD](https://nvd.nist.gov/) 提供权威的漏洞情报源。
-- 翻译由 **有道开放平台** 提供。
+- 翻译由 **有道开放平台** 、**Google translator** 提供。
 
 
 
