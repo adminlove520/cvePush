@@ -22,9 +22,9 @@ from datetime import datetime, timedelta, UTC
 from serverchan_sdk import sc_send
 
 # 基本配置
-SCKEY = os.getenv("SCKEY")
-DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK")
-DINGTALK_SECRET = os.getenv("DINGTALK_SECRET")  # 钉钉加签密钥
+SCKEY = os.getenv("SCKEY", "").strip()
+DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK", "").strip()
+DINGTALK_SECRET = os.getenv("DINGTALK_SECRET", "").strip()  # 钉钉加签密钥
 EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER")
 # 更健壮地处理EMAIL_SMTP_PORT，避免空字符串转换错误
 EMAIL_SMTP_PORT_VALUE = os.getenv("EMAIL_SMTP_PORT", "587")
@@ -62,6 +62,13 @@ file_handler.setFormatter(formatter)
 
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
+
+# 环境变量验证
+logger.debug(f"环境变量配置 - SCKEY: {'已设置' if SCKEY else '未设置'}, DINGTALK_WEBHOOK: {'已设置' if DINGTALK_WEBHOOK else '未设置'}, DINGTALK_SECRET: {'已设置' if DINGTALK_SECRET else '未设置'}")
+if DINGTALK_WEBHOOK and not DINGTALK_WEBHOOK.startswith('https://oapi.dingtalk.com/robot/send'):
+    logger.warning("DINGTALK_WEBHOOK格式不正确，应以https://oapi.dingtalk.com/robot/send开头")
+if DINGTALK_SECRET and len(DINGTALK_SECRET) != 67:
+    logger.warning(f"DINGTALK_SECRET长度异常，当前长度: {len(DINGTALK_SECRET)}，通常应该是67个字符")
 
 # 初始化数据库
 def init_db():
@@ -427,72 +434,133 @@ import hashlib
 
 # 通过钉钉发送通知
 def send_dingtalk_notification(vuln_info):
+    """发送钉钉通知"""
+    # 环境变量验证
     if not DINGTALK_WEBHOOK:
         logger.warning("钉钉Webhook 未配置，跳过钉钉推送")
-        return
-        
-    title, desp = generate_notification_content(vuln_info)
+        return False
     
-    # 钉钉消息格式
-    data = {
-        "msgtype": "markdown",
-        "markdown": {
-            "title": title,
-            "text": desp
-        }
-    }
+    # Webhook URL格式验证
+    if not DINGTALK_WEBHOOK.startswith('https://oapi.dingtalk.com/robot/send'):
+        logger.error(f"钉钉Webhook URL格式不正确: {DINGTALK_WEBHOOK}")
+        return False
+        
+    # 参数验证
+    if not vuln_info or not isinstance(vuln_info, dict):
+        logger.error(f"无效的vuln_info参数: {vuln_info}")
+        return False
+        
+    if 'id' not in vuln_info:
+        logger.error("vuln_info中缺少id字段")
+        return False
+        
+    logger.info(f"开始准备发送钉钉通知，漏洞ID: {vuln_info['id']}")
+    logger.debug(f"DINGTALK_WEBHOOK长度: {len(DINGTALK_WEBHOOK)}")
+    logger.debug(f"DINGTALK_SECRET配置状态: {'已配置' if DINGTALK_SECRET else '未配置'}")
     
     try:
+        title, desp = generate_notification_content(vuln_info)
+        
+        # 钉钉消息格式
+        data = {
+            "msgtype": "markdown",
+            "markdown": {
+                "title": title,
+                "text": desp
+            }
+        }
+        
         headers = {'Content-Type': 'application/json'}
+        
+        # 处理加签逻辑
         webhook_url = DINGTALK_WEBHOOK
-        
-        # 如果配置了加签密钥，则生成签名
-        if DINGTALK_SECRET:
-            # 严格按照钉钉官方文档实现签名生成逻辑
-            # 1. 获取当前时间戳（毫秒级）
-            timestamp = str(round(time.time() * 1000))
-            # 2. 拼接时间戳和密钥，格式为：timestamp + '\n' + secret
-            secret_enc = DINGTALK_SECRET.encode('utf-8')
-            string_to_sign = '{}\n{}'.format(timestamp, DINGTALK_SECRET)
-            string_to_sign_enc = string_to_sign.encode('utf-8')
-            # 3. 使用HmacSHA256算法计算签名
-            hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
-            # 4. 对签名进行Base64编码
-            sign = base64.b64encode(hmac_code).decode('utf-8')
-            # 5. 对Base64编码后的签名进行URL编码，确保特殊字符正确处理
-            import urllib.parse
-            sign_encoded = urllib.parse.quote_plus(sign)
-            # 6. 确保webhook_url不包含现有的timestamp和sign参数
-            # 解析URL，移除可能存在的timestamp和sign参数
-            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-            parsed_url = urlparse(webhook_url)
-            query_params = parse_qs(parsed_url.query)
-            # 删除已有的timestamp和sign参数
-            query_params.pop('timestamp', None)
-            query_params.pop('sign', None)
-            # 添加新的timestamp和sign参数
-            query_params['timestamp'] = [timestamp]
-            query_params['sign'] = [sign_encoded]
-            # 重建URL
-            new_query = urlencode(query_params, doseq=True)
-            webhook_url = urlunparse((
-                parsed_url.scheme,
-                parsed_url.netloc,
-                parsed_url.path,
-                parsed_url.params,
-                new_query,
-                parsed_url.fragment
-            ))
-            logger.info(f"已启用钉钉加签验证，时间戳: {timestamp}")
-        
-        response = requests.post(webhook_url, headers=headers, data=json.dumps(data), timeout=15)
-        response_json = response.json()
-        if response_json.get("errcode") == 0:
-            logger.info(f"钉钉通知已发送: {vuln_info['id']}")
-        else:
-            logger.error(f"钉钉通知发送失败: {response_json.get('errmsg')}")
+        try:
+            if DINGTALK_SECRET:
+                # 钉钉官方文档中的6步签名流程
+                # 1. 获取时间戳（毫秒级）
+                timestamp = str(round(time.time() * 1000))
+                logger.debug(f"生成时间戳: {timestamp}")
+                
+                # 2. 拼接字符串：timestamp + "\n" + secret
+                secret_enc = DINGTALK_SECRET.encode('utf-8')
+                string_to_sign = '{}\n{}'.format(timestamp, DINGTALK_SECRET)
+                string_to_sign_enc = string_to_sign.encode('utf-8')
+                logger.debug(f"待签名字符串长度: {len(string_to_sign)}")
+                
+                # 3. 使用HmacSHA256算法计算签名
+                hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
+                logger.debug(f"HMAC计算结果长度: {len(hmac_code)} 字节")
+                
+                # 4. 对签名进行Base64编码
+                sign = base64.b64encode(hmac_code).decode('utf-8')
+                logger.debug(f"Base64编码后签名长度: {len(sign)}")
+                
+                # 5. 对签名进行URL编码
+                import urllib.parse
+                from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+                sign_encoded = urllib.parse.quote_plus(sign)
+                logger.debug(f"URL编码后签名长度: {len(sign_encoded)}")
+                
+                # 6. 解析URL并重建，确保不会出现重复的参数
+                parsed_url = urlparse(webhook_url)
+                query_params = parse_qs(parsed_url.query)
+                logger.debug(f"原始URL中的参数数量: {len(query_params)}")
+                
+                # 验证access_token参数
+                if 'access_token' not in query_params:
+                    logger.error("钉钉Webhook URL中缺少access_token参数")
+                    return False
+                
+                # 删除已有的timestamp和sign参数，避免冲突
+                query_params.pop('timestamp', None)
+                query_params.pop('sign', None)
+                # 添加新的timestamp和sign参数
+                query_params['timestamp'] = [timestamp]
+                query_params['sign'] = [sign_encoded]
+                # 重建URL
+                new_query = urlencode(query_params, doseq=True)
+                webhook_url = urlunparse((
+                    parsed_url.scheme,
+                    parsed_url.netloc,
+                    parsed_url.path,
+                    parsed_url.params,
+                    new_query,
+                    parsed_url.fragment
+                ))
+                
+                # 记录调试信息
+                logger.debug(f"钉钉Webhook URL长度: {len(webhook_url)}")
+                logger.debug(f"URL中access_token参数: {query_params.get('access_token', ['未找到'])[0] if 'access_token' in query_params else '未找到'}")
+                logger.info(f"已启用钉钉加签验证，时间戳: {timestamp}")
+            
+            # 添加更详细的请求日志
+            logger.debug(f"准备发送钉钉请求，URL长度: {len(webhook_url)}")
+            logger.debug(f"请求数据长度: {len(json.dumps(data))}")
+            
+            # 发送请求
+            response = requests.post(webhook_url, headers=headers, data=json.dumps(data), timeout=15)
+            logger.debug(f"钉钉响应状态码: {response.status_code}")
+            
+            # 处理响应
+            try:
+                response_json = response.json()
+                logger.debug(f"钉钉响应内容: {json.dumps(response_json, ensure_ascii=False)}")
+                if response_json.get("errcode") == 0:
+                    logger.info(f"钉钉通知已发送: {vuln_info['id']}")
+                    return True
+                else:
+                    logger.error(f"钉钉通知发送失败: {response_json.get('errmsg')}")
+                    return False
+            except json.JSONDecodeError:
+                logger.error(f"无法解析钉钉响应: {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"发送钉钉通知时发生异常: {str(e)}", exc_info=True)
+            return False
     except Exception as e:
-        logger.error(f"钉钉通知发送异常: {str(e)}")
+        logger.error(f"准备钉钉通知内容时发生异常: {str(e)}", exc_info=True)
+        return False
 
 # 通过邮箱发送通知
 def send_email_notification(vuln_info):
