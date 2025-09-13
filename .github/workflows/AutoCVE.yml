@@ -39,10 +39,21 @@ jobs:
         with:
           name: vulns-db
           path: .  # 下载到工作目录
-        continue-on-error: true  # 首次运行时忽略错误
+        continue-on-error: true  # 忽略下载失败
 
-      - name: Create empty DB if download failed
-        if: steps.download-db.outcome == 'failure'
+      - name: Check if database file exists after download
+        id: check-db-file
+        run: |
+          if [ -f vulns.db ]; then
+            echo "Found existing database file"
+            echo "db_exists=true" >> $GITHUB_ENV
+          else
+            echo "Database file not found"
+            echo "db_exists=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create empty DB if not found
+        if: env.db_exists == 'false'
         run: |
           # 创建一个空的数据库文件，避免程序因缺少数据库文件而报错
           echo "Creating empty database file..."
@@ -132,5 +143,31 @@ jobs:
           draft: false
           prerelease: false
           files: ${{ env.ARCHIVE_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Commit and push data directory changes
+        if: env.new_vulns == 'true'
+        run: |
+          # 设置git配置
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          
+          # 获取UTC+8当前日期
+          TODAY_UTC8=$(date -u +'%Y-%m-%d' -d '+8 hours')
+          COMMIT_MESSAGE="DailyUpdate漏洞日报($TODAY_UTC8)"
+          
+          # 添加data目录到暂存区
+          git add data/
+          
+          # 检查是否有变更
+          if git diff --cached --quiet; then
+            echo "No changes to commit in data directory"
+          else
+            echo "Committing changes with message: $COMMIT_MESSAGE"
+            git commit -m "$COMMIT_MESSAGE"
+            echo "Pushing changes to repository"
+            git push origin HEAD:main
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
