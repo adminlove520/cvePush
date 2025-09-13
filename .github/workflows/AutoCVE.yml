@@ -8,7 +8,7 @@ on:
       push_mode:
         description: '推送模式选择: all - 所有推送方式, serverchan - Server酱, dingtalk - 钉钉, email - 邮件'
         required: true
-        default: 'all'
+        default: 'dingtalk'
         type: choice
         options:
           - all

@@ -1,4 +1,4 @@
-# 🔥 CVE Push Service | 自动化高危漏洞情报推送
+# 🔥 CVE Push | 自动化高危漏洞情报推送
 
 <p align="center">
 
