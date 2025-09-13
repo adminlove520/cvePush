@@ -44,6 +44,9 @@ SCKEY=您的Server酱SendKey
 
 # 钉钉配置
 DINGTALK_WEBHOOK=您的钉钉Webhook地址
+# 钉钉加签密钥（可选）
+# 如果您的钉钉机器人启用了加签功能，请填写此密钥
+# DINGTALK_SECRET=您的钉钉加签密钥
 
 # 邮箱配置
 EMAIL_SMTP_SERVER=您的SMTP服务器地址
@@ -77,6 +80,8 @@ load_dotenv()
 ```cmd
 set SCKEY=您的Server酱SendKey
 set DINGTALK_WEBHOOK=您的钉钉Webhook地址
+# 可选：设置钉钉加签密钥
+# set DINGTALK_SECRET=您的钉钉加签密钥
 set EMAIL_SMTP_SERVER=您的SMTP服务器地址
 set EMAIL_SMTP_PORT=587
 set EMAIL_USERNAME=您的发件人邮箱
@@ -93,6 +98,8 @@ set PUSH_MODE=all
 ```bash
 export SCKEY=您的Server酱SendKey
 export DINGTALK_WEBHOOK=您的钉钉Webhook地址
+# 可选：设置钉钉加签密钥
+# export DINGTALK_SECRET=您的钉钉加签密钥
 export EMAIL_SMTP_SERVER=您的SMTP服务器地址
 export EMAIL_SMTP_PORT=587
 export EMAIL_USERNAME=您的发件人邮箱

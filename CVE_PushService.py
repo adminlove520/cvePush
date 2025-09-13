@@ -23,6 +23,7 @@ from serverchan_sdk import sc_send
 # 基本配置
 SCKEY = os.getenv("SCKEY")
 DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK")
+DINGTALK_SECRET = os.getenv("DINGTALK_SECRET")  # 钉钉加签密钥
 EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER")
 EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
 EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
@@ -234,6 +235,11 @@ def send_serverchan_notification(vuln_info):
     except Exception as e:
         logger.error(f"Server酱通知发送失败: {str(e)}")
 
+import time
+import base64
+import hmac
+import hashlib
+
 # 通过钉钉发送通知
 def send_dingtalk_notification(vuln_info):
     if not DINGTALK_WEBHOOK:
@@ -253,7 +259,28 @@ def send_dingtalk_notification(vuln_info):
     
     try:
         headers = {'Content-Type': 'application/json'}
-        response = requests.post(DINGTALK_WEBHOOK, headers=headers, data=json.dumps(data), timeout=15)
+        webhook_url = DINGTALK_WEBHOOK
+        
+        # 如果配置了加签密钥，则生成签名
+        if DINGTALK_SECRET:
+            # 获取当前时间戳
+            timestamp = str(round(time.time() * 1000))
+            # 拼接时间戳和密钥
+            secret_enc = DINGTALK_SECRET.encode('utf-8')
+            string_to_sign = '{}\n{}'.format(timestamp, DINGTALK_SECRET)
+            string_to_sign_enc = string_to_sign.encode('utf-8')
+            # 使用HmacSHA256算法计算签名
+            hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
+            # 对签名进行Base64编码
+            sign = base64.b64encode(hmac_code).decode('utf-8')
+            # 将时间戳和签名添加到URL中
+            if '?' in webhook_url:
+                webhook_url = f"{webhook_url}&timestamp={timestamp}&sign={sign}"
+            else:
+                webhook_url = f"{webhook_url}?timestamp={timestamp}&sign={sign}"
+            logger.info("已启用钉钉加签验证")
+        
+        response = requests.post(webhook_url, headers=headers, data=json.dumps(data), timeout=15)
         response_json = response.json()
         if response_json.get("errcode") == 0:
             logger.info(f"钉钉通知已发送: {vuln_info['id']}")

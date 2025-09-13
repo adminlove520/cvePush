@@ -2,14 +2,14 @@
 
 <p align="center">
 
-  <img src="https://img.shields.io/github/stars/hijack1r/CVE_PushService?color=yellow&logo=riseup&logoColor=yellow&style=flat-square"></a>
-  <img src="https://img.shields.io/github/forks/hijack1r/CVE_PushService?color=purple&style=flat-square"></a>
-  <img src="https://img.shields.io/badge/CVE-PushService-blue?logo=datadog" alt="CVE Monitor">
+  <img src="https://img.shields.io/github/stars/adminlove520/cvePush?color=yellow&logo=riseup&logoColor=yellow&style=flat-square"></a>
+  <img src="https://img.shields.io/github/forks/adminlove520/cvePush?color=purple&style=flat-square"></a>
+  <img src="https://img.shields.io/badge/cvePush-blue?logo=datadog" alt="CVE Monitor">
 
 </p>
 
 > ⚡ 面向网络安全从业者的 **高危漏洞实时情报推送工具**  
-> 自动拉取 NVD 最新漏洞数据，筛选 **CVSS ≥ 7.0** 的高危漏洞，并通过 **[Server酱3](https://sc3.ft07.com/)** 第一时间推送到您的设备，帮助您在应急响应等场合中抢占先机。  
+> 自动拉取 NVD 最新漏洞数据，筛选 **CVSS ≥ 7.0** 的高危漏洞，并通过钉钉、邮件等推送渠道推送漏洞信息，帮助您在应急响应等场合中抢占先机。  
 
 ---
 
@@ -53,15 +53,7 @@
 ---
 
 ### 1. 准备工作
-- Star 本项目 （舍友说每多10个⭐，就请我吃一顿猪脚饭，助梦瘦弱男大吃猪脚饭🙏）
-- Fork 本项目，Fork 后你的账号下会存在一个同样的项目（接下来的操作将在你自己的项目中进行）
-
-![1.png](images/1.png)
-
-- 直接从手机应用商店搜索`Server酱`下载安装，或访问 [Server酱3](https://sc3.ft07.com/) 点击APP下载。
-- 下载app后注册账号，登录官网 [Server酱3](https://sc3.ft07.com/) 微信扫码后即可获取`SendKey`
-
-![2.png](images/2.png)
+看（[README.md](./README.md) ）
 
 ### 2. 配置推送方式
 
@@ -73,6 +65,7 @@
 
 **钉钉推送配置：**
 - DINGTALK_WEBHOOK : 钉钉机器人的Webhook地址
+- DINGTALK_SECRET : 钉钉机器人的加签密钥（可选，如启用加签功能）
 
 **邮箱推送配置：**
 - EMAIL_SMTP_SERVER : SMTP服务器地址（例如：smtp.qq.com）
@@ -81,26 +74,19 @@
 - EMAIL_PASSWORD : 发件人邮箱密码/授权码
 - EMAIL_RECEIVER : 收件人邮箱地址
 
-![3.png](images/3.png)
-![4.png](images/4.png)
 
 ### 3. GitHub Actions 自动化运行
 
-- 点击 `Actions` 进入运行页面，点击 `I understand my workflow` 按钮。
-- 自动刷新后左侧出现 `Auto CVE Push Service` 流程。
-- 点击 `Auto CVE Push Service` 流程，点击 `Enable Workflow` 按钮。
-- 给自己的项目点击两次 `Star` （Fork后你自己的项目）启动Action。
-- 再点击上面的 `Actions` 选择 `Auto CVE Push Service` 看看有没有报错。
-- 没有报错的话Server酱里应该就会有推送通知了（记得打开Server酱App通知权限）
-- 推推送效果示例：
-
-<p align = "center">
-<img src="https://github.com/hijack1r/CVE_PushService/blob/main/images/5.png" align = “middle”  width="90%" />
-</p>
-<p align = "center"> 
-<img src="https://github.com/hijack1r/CVE_PushService/blob/main/images/6.jpg" align = “middle”  width="46%" />
-<img src="https://github.com/hijack1r/CVE_PushService/blob/main/images/0.jpg" align = “middle”  width="50%" />
-</p>
+- 点击仓库顶部的 `Actions` 标签页进入工作流页面，首次使用需点击 `I understand my workflow` 按钮确认启用工作流
+- 页面自动刷新后，左侧菜单会出现 `Auto CVE Push Service` 工作流选项
+- 点击该工作流，然后点击页面中的 `Enable Workflow` 按钮启用自动运行
+- 启用后，您可以通过两种方式运行工作流：
+  1. **自动触发**：每天北京时间约7:30自动执行（根据GitHub队列情况可能有波动）
+  2. **手动触发**：点击 `Run workflow` 按钮，可选择 `push_mode`（推送模式：all/serverchan/dingtalk/email）后立即执行
+- 再次进入 `Actions` 页面，点击 `Auto CVE Push Service` 工作流，检查最近一次运行是否有报错
+- 若运行成功，系统将根据配置的推送方式（Server酱/钉钉/邮箱）发送通知（请确保已开启对应App的通知权限）
+- 系统支持钉钉加签功能，如需启用请在GitHub Secrets中配置`DINGTALK_SECRET`
+- 推送效果示例：
 
 ### 注意
 
@@ -119,13 +105,14 @@
 
 ## 📅 更新日志
 
-> 目前仅为示例，后续持续完善
-- 2025-09-01 ✅️ 优化自动执行时间
-- 2025-08-31 🎉 首次发布：支持高危漏洞自动推送，集成 GitHub Actions
+- 2025-09-10 🔐 新增钉钉加签功能：支持配置DINGTALK_SECRET环境变量，增强钉钉机器人的安全性
+- 2025-09-05 🔧 优化GitHub Actions工作流：支持手动触发时选择push_mode参数，灵活控制推送方式
+- 2025-09-01 ⏰ 优化自动执行时间：调整为每天北京时间约7:30自动运行
+- 2025-08-31 🎉 首次发布：支持高危漏洞自动推送，集成GitHub Actions
 
-> TODO:
+> 计划功能：
 - 🔲 增加漏洞分类标签
-- 🔲 针对已曝出漏洞实时跟踪全网 POC/EXP 情况，自动通知。
+- 🔲 实现POC/EXP跟踪：针对已曝出漏洞实时跟踪全网POC/EXP情况，自动通知
 
 ---
 
