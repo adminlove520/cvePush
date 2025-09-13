@@ -34,7 +34,7 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 
 # 推送模式配置 (all, serverchan, dingtalk, email)
-PUSH_MODE = os.getenv("PUSH_MODE", "all").lower()
+PUSH_MODE = os.getenv("PUSH_MODE", "dingtalk").lower()
 
 DB_PATH = 'vulns.db'  # 数据库文件路径
 LOG_FILE = 'cveflows.log'  # 日志文件前缀
@@ -448,7 +448,7 @@ def send_dingtalk_notification(vuln_info):
         
         # 如果配置了加签密钥，则生成签名
         if DINGTALK_SECRET:
-            # 获取当前时间戳
+            # 获取当前时间戳（毫秒级）
             timestamp = str(round(time.time() * 1000))
             # 拼接时间戳和密钥
             secret_enc = DINGTALK_SECRET.encode('utf-8')
@@ -458,11 +458,14 @@ def send_dingtalk_notification(vuln_info):
             hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
             # 对签名进行Base64编码
             sign = base64.b64encode(hmac_code).decode('utf-8')
+            # 对Base64编码后的签名进行URL编码，修复签名不匹配问题
+            import urllib.parse
+            sign_encoded = urllib.parse.quote_plus(sign)
             # 将时间戳和签名添加到URL中
             if '?' in webhook_url:
-                webhook_url = f"{webhook_url}&timestamp={timestamp}&sign={sign}"
+                webhook_url = f"{webhook_url}&timestamp={timestamp}&sign={sign_encoded}"
             else:
-                webhook_url = f"{webhook_url}?timestamp={timestamp}&sign={sign}"
+                webhook_url = f"{webhook_url}?timestamp={timestamp}&sign={sign_encoded}"
             logger.info("已启用钉钉加签验证")
         
         response = requests.post(webhook_url, headers=headers, data=json.dumps(data), timeout=15)
