@@ -105,7 +105,7 @@ jobs:
         run: |
           echo "No new_vulns.flag file found, trying to process recent vulnerabilities..."
           # 获取最近24小时内添加的漏洞ID
-          python -c "import sqlite3, time, datetime; conn = sqlite3.connect('vulns.db'); c = conn.cursor(); c.execute(\"SELECT id FROM vulns WHERE published_date >= ?\", [(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')]); vulns = c.fetchall(); conn.close(); print('\n'.join([v[0] for v in vulns]))" > recent_vulns.txt
+          python -c "import sqlite3, time, datetime; conn = sqlite3.connect('data/db/vulns.db'); c = conn.cursor(); c.execute(\"SELECT id FROM vulns WHERE published_date >= ?\", [(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')]); vulns = c.fetchall(); conn.close(); print('\n'.join([v[0] for v in vulns]))" > recent_vulns.txt
           
           # 如果有最近的漏洞，处理它们
           if [ -s recent_vulns.txt ]; then

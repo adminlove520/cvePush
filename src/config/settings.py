@@ -177,11 +177,25 @@ class Settings:
                     return
             
             if user_config:
+                # 统一配置键的大小写
+                normalized_config = self._normalize_config_keys(user_config)
                 # 合并配置
-                self._merge_config(self._settings, user_config)
+                self._merge_config(self._settings, normalized_config)
                 logger.info(f"成功从配置文件加载配置: {config_file}")
         except Exception as e:
             logger.error(f"加载配置文件失败: {str(e)}")
+            
+    def _normalize_config_keys(self, config: Dict) -> Dict:
+        """标准化配置键的大小写"""
+        normalized = {}
+        for key, value in config.items():
+            # 对于顶层键，转换为大写（如果需要）
+            normalized_key = key.upper() if key.lower() in ['cache', 'logging'] else key
+            if isinstance(value, dict):
+                normalized[normalized_key] = self._normalize_config_keys(value)
+            else:
+                normalized[normalized_key] = value
+        return normalized
     
     def _merge_config(self, base: Dict, update: Dict) -> None:
         """递归合并配置字典

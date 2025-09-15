@@ -13,6 +13,7 @@ vulns.db
 .env.development.local
 .env.test.local
 .env.production.local
+config.example.yaml
 
 # Python编译文件
 __pycache__/
@@ -63,3 +64,6 @@ Thumbs.db
 
 # 标志文件
 new_vulns.flag
+
+# 备份文件
+/archive/

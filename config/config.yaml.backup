@@ -17,20 +17,15 @@ NOTIFICATION:
   wechat_work:
     enabled: false
     webhook_url: ''
-CACHE:
+cache:
+  cache_dir: .cache
+  cache_timeout: 3600
   enabled: true
-  dir: .cache
-  ttl: 3600
-  max_size: 100000000
-LOGGING:
-  level: INFO
-  file: poc_monitor.log
-  format: '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
-  max_bytes: 10485760
+logging:
   backup_count: 5
-  enable_console: true
-  enable_file: true
-# 特定于POC监控的数据源配置
+  file: poc_monitor.log
+  level: INFO
+  max_bytes: 10485760
 sources:
 - enabled: true
   name: Poc-Monitor_v1.0.1_update

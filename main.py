@@ -115,6 +115,33 @@ def process_daily_vulns() -> None:
         logger.error(f"处理当日漏洞时发生错误: {str(e)}", exc_info=True)
         print(f"处理当日漏洞失败: {str(e)}", file=sys.stderr)
 
+def fetch_full_year_data(year=None):
+    """获取指定年份的全量CVE数据并保存为Markdown文件"""
+    try:
+        collector = cve_collector
+        
+        # 如果没有指定年份，默认使用当前年份
+        target_year = year if year else datetime.now().year
+        
+        # 获取全量数据
+        year_data = collector.fetch_full_year_data(year=target_year)
+        
+        # 保存为Markdown文件
+        if year_data and year_data.get('data'):
+            file_path = collector.save_full_year_data_to_markdown(year_data)
+            if file_path:
+                logger.info(f"全量数据已成功保存到文件: {file_path}")
+                return True
+            else:
+                logger.error("保存全量数据失败")
+                return False
+        else:
+            logger.warning(f"未获取到{target_year}年的有效CVE数据")
+            return False
+    except Exception as e:
+        logger.error(f"获取全量数据时发生错误: {str(e)}")
+        return False
+
 def start_monitoring() -> None:
     """启动监控服务"""
     try:
@@ -176,6 +203,10 @@ def main() -> None:
     report_parser = subparsers.add_parser('report', help='生成每日报告')
     report_parser.add_argument('--date', help='指定日期（格式：YYYY-MM-DD），默认为当天')
     
+    # 添加全量数据获取命令
+    full_year_parser = subparsers.add_parser('full-year', help='获取指定年份的全量CVE数据并保存为Markdown文件')
+    full_year_parser.add_argument('--year', type=int, default=None, help='指定要获取数据的年份，默认为当前年份')
+    
     # 解析命令行参数
     args = parser.parse_args()
     
@@ -188,6 +219,8 @@ def main() -> None:
         start_monitoring()
     elif args.command == 'report':
         generate_daily_report(args.date)
+    elif args.command == 'full-year':
+        fetch_full_year_data(args.year)
     else:
         # 如果没有指定命令，显示帮助信息
         parser.print_help()

@@ -133,7 +133,8 @@ class PocMonitor:
             
             # 添加GitHub token（如果有）
             headers = {'User-Agent': settings.get('APP.user_agent', 'Mozilla/5.0')}
-            github_token = settings.get('API.github.token', '')
+            # 优先从环境变量读取GitHub token
+            github_token = os.environ.get('GITHUB_TOKEN', '') or settings.get('API.github.token', '')
             if github_token:
                 headers['Authorization'] = f'token {github_token}'
             

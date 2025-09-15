@@ -39,6 +39,7 @@ src/
 - **去重存储**：使用数据库存储，避免重复推送
 - **日志管理**：支持日志文件轮转，方便审计与追溯
 - **自动化运行**：支持 GitHub Actions 定时任务
+- **全量数据同步**：支持定时获取指定年份的全量CVE数据并保存为Markdown格式
 
 ## 快速开始
 
@@ -52,6 +53,8 @@ src/
    ```
 
 3. **配置环境变量**：
+   - 确保 `config/config.yaml` 文件存在
+   - 编辑 `config/config.yaml` 文件，填写您的配置信息
    - 复制 `.env.example` 并重命名为 `.env`
    - 编辑 `.env` 文件，填写您的配置信息
 
@@ -75,6 +78,12 @@ python main.py monitor
 python main.py report
 # 生成指定日期的报告
 python main.py report --date 2023-09-13
+
+# 获取当前年份的全量CVE数据
+python main.py full-year
+
+# 获取指定年份的全量CVE数据
+python main.py full-year --year 2024
 ```
 
 #### 本地测试
@@ -90,15 +99,25 @@ python main.py report --date 2023-09-13
 
 ## 配置说明
 
-### 环境变量配置
+### 配置环境变量
 
-项目使用 `.env` 文件管理配置，主要配置项包括：
+项目支持通过 `.env` 文件或系统环境变量进行配置。环境变量的优先级高于配置文件。
 
-- **Server酱配置**：`SCKEY` - Server酱SendKey
-- **钉钉配置**：`DINGTALK_WEBHOOK` - 钉钉机器人Webhook地址，`DINGTALK_SECRET` - 钉钉加签密钥
-- **邮箱配置**：`EMAIL_SMTP_SERVER`、`EMAIL_SMTP_PORT`、`EMAIL_USERNAME`、`EMAIL_PASSWORD`、`EMAIL_RECEIVER`
-- **推送模式**：`PUSH_MODE` - 可选值：all、serverchan、dingtalk、email
-- **其他配置**：日志级别、缓存设置、数据库路径等
+1. 复制 `.env.example` 文件并重命名为 `.env`
+   ```bash
+   cp .env.example .env
+   ```
+
+2. 编辑 `.env` 文件，根据您的需求填写相应的配置值
+
+3. 配置项说明：
+   - **GitHub Token**：`GITHUB_TOKEN` - 用于增加API调用配额，避免触发GitHub API的速率限制
+   - **钉钉配置**：`DINGTALK_WEBHOOK` - 钉钉机器人Webhook地址，`DINGTALK_SECRET` - 钉钉加签密钥（可选）
+   - **邮箱配置**：`EMAIL_SMTP_SERVER` - SMTP服务器地址，`EMAIL_SMTP_PORT` - SMTP服务器端口，`EMAIL_USERNAME` - 发件人邮箱，`EMAIL_PASSWORD` - 邮箱密码/授权码，`EMAIL_SENDER` - 发件人地址，`EMAIL_RECEIVER` - 收件人邮箱地址，`EMAIL_ENABLED` - 是否启用邮件通知（true/false）
+   - **企业微信配置**：`WECHAT_WORK_WEBHOOK` - 企业微信机器人Webhook地址
+   - **其他配置**：日志级别、缓存设置、数据库路径等（可通过配置文件设置）
+
+也可以通过 `config/config.yaml` 文件进行配置，具体配置项请参考配置文件说明。
 
 ### 配置文件
 
@@ -121,8 +140,19 @@ python main.py report --date 2023-09-13
 本项目支持通过 GitHub Actions 实现自动化运行：
 
 1. 在仓库的 `Settings` → `Secrets` 中配置所需的环境变量
-2. 启用 `.github/workflows/AutoCVE.yml` 工作流
-3. 工作流将每天自动运行，并通过配置的方式推送通知
+2. 启用 `.github/workflows/AutoCVE.yml` 工作流进行每日漏洞推送
+3. 启用 `.github/workflows/full_year_sync.yml` 工作流进行全量数据同步
+
+### 全量数据同步工作流
+
+全量数据同步工作流 (`full_year_sync.yml`) 提供以下功能：
+
+- **自动同步**：可配置定时触发，默认为每月1日执行
+- **手动触发**：支持通过 GitHub Actions 界面手动触发
+- **年份参数**：可指定要同步的年份（默认为当前年份）
+- **强制更新**：支持强制更新已存在的数据
+
+工作流会将指定年份的全量CVE数据同步并保存为Markdown格式，便于查阅和分析历史漏洞信息。
 
 ## 常见问题
 
@@ -151,6 +181,7 @@ python main.py report --date 2023-09-13
 
 ## 更新日志
 
+- 2025-09-15 📊 新增全量数据同步功能：支持定时获取指定年份的全量CVE数据并保存为Markdown格式
 - 2025-09-13 🔄 增强翻译功能：新增Google翻译API作为容灾备份
 - 2025-09-13 🐛 修复环境变量处理问题：增强EMAIL_SMTP_PORT的类型转换逻辑
 - 2025-09-13 🛠️ 优化GitHub Actions工作流：添加数据库下载失败的fallback机制

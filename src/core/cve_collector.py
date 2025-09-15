@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 import gzip
 import io
 import os
+import re
 
 from src.config import settings
 from src.utils.db_manager import db_manager
@@ -544,11 +545,12 @@ class CVECollector:
         logger.info(f"获取到 {len(all_cves)} 个最近的CVE漏洞")
         return all_cves
         
-    def fetch_nvd_data(self, use_recent=True):
+    def fetch_nvd_data(self, use_recent=True, year=None):
         """从NVD获取CVE数据
         
         Args:
             use_recent: 是否获取最近的CVE数据
+            year: 可选，指定获取哪一年的数据
             
         Returns:
             List: CVE数据列表
@@ -556,8 +558,8 @@ class CVECollector:
         if use_recent:
             url = self.nvd_recent_feed_url
         else:
-            year = datetime.now().year
-            url = self.nvd_year_feed_url_template.format(year)
+            target_year = year if year else datetime.now().year
+            url = self.nvd_year_feed_url_template.format(target_year)
 
         try:
             logger.info(f"Fetching data from: {url}")
@@ -575,6 +577,107 @@ class CVECollector:
         except Exception as e:
             logger.error(f"Failed to fetch NVD data: {str(e)}")
             return []
+    
+    def fetch_full_year_data(self, year=None):
+        """获取指定年份的全量CVE数据
+        
+        Args:
+            year: 可选，指定获取哪一年的数据，默认为当前年份
+            
+        Returns:
+            Dict: 包含年份和CVE数据列表的字典
+        """
+        target_year = year if year else datetime.now().year
+        logger.info(f"开始获取{target_year}年的全量CVE数据")
+        
+        # 获取年度数据
+        year_data = self.fetch_nvd_data(use_recent=False, year=target_year)
+        
+        if not year_data:
+            logger.warning(f"未获取到{target_year}年的CVE数据")
+            return {'year': target_year, 'data': []}
+        
+        logger.info(f"成功获取到{target_year}年的{len(year_data)}条CVE数据")
+        
+        return {
+            'year': target_year,
+            'data': year_data,
+            'count': len(year_data),
+            'fetch_time': datetime.now(UTC).isoformat()
+        }
+    
+    def save_full_year_data_to_markdown(self, year_data, output_dir=None):
+        """将全量年度数据保存为Markdown文件
+        
+        Args:
+            year_data: 包含年份和CVE数据的字典
+            output_dir: 输出目录，默认为data/db/
+            
+        Returns:
+            str: 保存的文件路径，如果保存失败则返回None
+        """
+        from src.utils.file_helper import file_helper
+        
+        target_year = year_data.get('year')
+        if not target_year:
+            logger.error("无法确定要保存的年份")
+            return None
+        
+        # 创建输出目录
+        if not output_dir:
+            output_dir = os.path.join(settings.BASE_DIR, 'data', 'db')
+        
+        # 确保目录存在
+        file_helper.ensure_directory_exists(output_dir)
+        
+        # 构建文件路径
+        file_path = os.path.join(output_dir, f'nvdData_{target_year}.md')
+        
+        try:
+            # 创建Markdown内容
+            md_content = []
+            md_content.append(f"# NVD CVE 全量数据 {target_year}")
+            md_content.append(f"> 数据获取时间: {year_data.get('fetch_time')}")
+            md_content.append(f"> 共包含 {year_data.get('count', 0)} 条CVE记录")
+            md_content.append("")
+            md_content.append("| ID | 发布日期 | 严重性 | CVSS评分 | 描述 |")
+            md_content.append("|----|---------|--------|---------|------|")
+            
+            # 处理每条CVE数据
+            cve_list = year_data.get('data', [])
+            for item in cve_list:
+                try:
+                    cve_data = self._parse_nvd_cve_item_v2(item)
+                    
+                    # 提取需要的字段
+                    cve_id = cve_data.get('id', 'UNKNOWN')
+                    published_date = cve_data.get('published_date', 'N/A')
+                    severity = cve_data.get('severity', 'UNKNOWN')
+                    cvss_score = cve_data.get('cvss_score', 'N/A')
+                    
+                    # 清理描述，移除Markdown特殊字符
+                    description = cve_data.get('description', 'N/A')
+                    description = re.sub(r'[|\\]', '', description)  # 移除竖线和反斜杠
+                    description = description[:200] + '...' if len(description) > 200 else description
+                    
+                    # 添加到表格行
+                    md_content.append(f"| {cve_id} | {published_date} | {severity} | {cvss_score} | {description} |")
+                except Exception as e:
+                    logger.warning(f"处理CVE数据时出错: {str(e)}")
+                    continue
+            
+            # 写入文件
+            success = file_helper.write_file(file_path, '\n'.join(md_content))
+            
+            if success:
+                logger.info(f"全量CVE数据已保存到: {file_path}")
+                return file_path
+            else:
+                logger.error(f"保存全量CVE数据失败")
+                return None
+        except Exception as e:
+            logger.error(f"保存全量CVE数据到Markdown时出错: {str(e)}")
+            return None
     
     def _save_cve_to_db(self, cve_data: Dict) -> bool:
         """将CVE信息保存到数据库
