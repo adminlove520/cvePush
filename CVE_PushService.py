@@ -21,6 +21,18 @@ from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime, timedelta, UTC
 from serverchan_sdk import sc_send
 
+# 导入工具包
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from utils import (
+    db_manager,
+    DateHelper,
+    FileHelper,
+    TranslationHelper,
+    translate,
+    get_current_year,
+    get_week_date_format
+)
+
 # 基本配置
 SCKEY = os.getenv("SCKEY", "").strip()
 DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK", "").strip()
@@ -72,111 +84,11 @@ if DINGTALK_SECRET and len(DINGTALK_SECRET) != 67:
 
 # 初始化数据库
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # 检查表是否存在
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vulns'")
-    table_exists = c.fetchone() is not None
-    
-    if not table_exists:
-        # 创建表（新表）
-        c.execute('''CREATE TABLE IF NOT EXISTS vulns
-                     (id TEXT PRIMARY KEY, 
-                      published_date TEXT, 
-                      cvss_score REAL, 
-                      description TEXT, 
-                      vector_string TEXT,
-                      refs TEXT,
-                      source TEXT,
-                      tags TEXT)''')
+    # 使用工具包中的数据库管理器来初始化数据库
+    if db_manager.ensure_table_exists():
+        logger.info("数据库初始化成功")
     else:
-        # 检查表是否有tags列
-        c.execute("PRAGMA table_info(vulns)")
-        columns = [column[1] for column in c.fetchall()]
-        if 'tags' not in columns:
-            # 添加tags列
-            c.execute("ALTER TABLE vulns ADD COLUMN tags TEXT")
-    
-    conn.commit()
-    conn.close()
-
-# 获取当前年份
-def get_current_year():
-    return datetime.now().year
-
-# 翻译函数（支持有道和Google翻译API容灾）
-def translate(text):
-    # 主翻译API：有道翻译
-    def youdao_translate(text):
-        url = 'https://aidemo.youdao.com/trans'
-        max_retries = 2
-        retry_count = 0
-        
-        while retry_count <= max_retries:
-            try:
-                data = {"q": text, "from": "auto", "to": "zh-CHS"}
-                resp = requests.post(url, data, timeout=15)
-                if resp is not None and resp.status_code == 200:
-                    respJson = resp.json()
-                    if "translation" in respJson:
-                        return "\n".join(str(i) for i in respJson["translation"])
-                else:
-                    logger.warning(f"有道翻译API返回非200状态码: {resp.status_code if resp else '无响应'}, 尝试第{retry_count+1}次重试...")
-            except requests.exceptions.ConnectionError as e:
-                logger.warning(f"有道翻译API连接错误: {str(e)}, 尝试第{retry_count+1}次重试...")
-            except requests.exceptions.Timeout as e:
-                logger.warning(f"有道翻译API请求超时: {str(e)}, 尝试第{retry_count+1}次重试...")
-            except ValueError as e:
-                logger.warning(f"有道翻译API返回格式错误: {str(e)}")
-                break  # JSON解析错误不需要重试
-            except Exception as e:
-                logger.warning(f"有道翻译消息时发生错误: {str(e)}")
-            
-            retry_count += 1
-            if retry_count <= max_retries:
-                time.sleep(1)  # 重试间隔1秒
-        
-        return None  # 所有重试都失败时返回None
-    
-    # 备用翻译API：Google翻译
-    def google_translate(text):
-        url = 'https://translate.googleapis.com/translate_a/single'
-        params = {
-            'client': 'gtx',
-            'sl': 'auto',  # 源语言自动检测
-            'tl': 'zh-CN',  # 目标语言为中文
-            'dt': 't',
-            'q': text
-        }
-        
-        try:
-            resp = requests.get(url, params=params, timeout=15)
-            if resp.status_code == 200:
-                respJson = resp.json()
-                if respJson and isinstance(respJson, list):
-                    # Google翻译API返回的结构需要解析
-                    translated_text = ''.join([item[0] for item in respJson[0] if item and item[0]])
-                    return translated_text
-        except Exception as e:
-            logger.warning(f"Google翻译API错误: {str(e)}")
-        
-        return None  # 失败时返回None
-    
-    # 首先尝试使用有道翻译API
-    logger.info("使用有道翻译API进行翻译...")
-    translated_text = youdao_translate(text)
-    
-    # 如果有道翻译API失败，尝试使用Google翻译API
-    if translated_text is None:
-        logger.info("有道翻译API失败，尝试使用Google翻译API进行容灾...")
-        translated_text = google_translate(text)
-    
-    # 如果所有翻译API都失败，返回原文
-    if translated_text is None or translated_text.strip() == '':
-        logger.warning("所有翻译API都失败，返回原文")
-        return text
-    
-    return translated_text
+        logger.error("数据库初始化失败")
 
 # 从NVD获取CVE数据
 def fetch_nvd_data(use_recent=True):
@@ -200,14 +112,7 @@ def fetch_nvd_data(use_recent=True):
 
 # 检查漏洞是否在最近24小时内发布
 def is_recent(published_date_str):
-    try:
-        # 将发布日期转换为UTC时区感知的datetime对象
-        published_dt = datetime.strptime(published_date_str, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=UTC)
-        time_diff = datetime.now(UTC) - published_dt
-        return time_diff.total_seconds() <= 24 * 3600
-    except Exception as e:
-        logger.error(f"Failed to parse date {published_date_str}: {str(e)}")
-        return False
+    return DateHelper.is_recent(published_date_str)
 
 # 解析CVE条目，提取关键信息
 def parse_cve_item(cve_item):
@@ -326,39 +231,11 @@ def parse_cve_item(cve_item):
 
 # 检查是否是新漏洞
 def is_new_vuln(vuln_info):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM vulns WHERE id=?", (vuln_info['id'],))
-    exists = c.fetchone() is not None
-    conn.close()
-    return not exists
+    return db_manager.is_new_vuln(vuln_info['id'])
 
 # 保存漏洞信息到数据库
 def save_vuln(vuln_info):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    try:
-        # 检查数据库是否有tags列
-        c.execute("PRAGMA table_info(vulns)")
-        columns = [column[1] for column in c.fetchall()]
-        
-        if 'tags' in columns:
-            # 如果有tags列，插入包含tags的完整数据
-            c.execute("INSERT INTO vulns VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                      (vuln_info['id'], vuln_info['published_date'], vuln_info['cvss_score'],
-                       vuln_info['description'], vuln_info['vector_string'],
-                       vuln_info['refs'], vuln_info['source'], vuln_info.get('tags', '未分类')))
-        else:
-            # 如果没有tags列，插入不包含tags的数据
-            c.execute("INSERT INTO vulns VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      (vuln_info['id'], vuln_info['published_date'], vuln_info['cvss_score'],
-                       vuln_info['description'], vuln_info['vector_string'],
-                       vuln_info['refs'], vuln_info['source']))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        pass
-    finally:
-        conn.close()
+    return db_manager.save_vuln(vuln_info)
 
 # 生成通知内容
 def generate_notification_content(vuln_info):
@@ -618,78 +495,11 @@ def send_notification(vuln_info):
 
 # 获取当天日期的漏洞信息
 def get_today_vulnerabilities():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # 计算今天的日期范围（UTC时间）
-    today = datetime.now(UTC).date()
-    tomorrow = today + timedelta(days=1)
-    
-    # 格式化日期字符串
-    today_str = today.strftime('%Y-%m-%d')
-    tomorrow_str = tomorrow.strftime('%Y-%m-%d')
-    
-    # 检查数据库是否有tags列
-    c.execute("PRAGMA table_info(vulns)")
-    columns = [column[1] for column in c.fetchall()]
-    
-    # 根据是否有tags列选择不同的查询语句
-    if 'tags' in columns:
-        c.execute("""
-            SELECT id, published_date, cvss_score, description, vector_string, refs, source, tags 
-            FROM vulns 
-            WHERE published_date >= ? AND published_date < ?
-            ORDER BY cvss_score DESC
-        """, (today_str, tomorrow_str))
-    else:
-        c.execute("""
-            SELECT id, published_date, cvss_score, description, vector_string, refs, source 
-            FROM vulns 
-            WHERE published_date >= ? AND published_date < ?
-            ORDER BY cvss_score DESC
-        """, (today_str, tomorrow_str))
-    
-    vulns = []
-    for row in c.fetchall():
-        vuln_dict = {
-            'id': row[0],
-            'published_date': row[1],
-            'cvss_score': row[2],
-            'description': row[3],
-            'vector_string': row[4],
-            'refs': row[5],
-            'source': row[6]
-        }
-        # 如果查询结果包含tags列，则添加tags字段
-        if len(row) > 7:
-            vuln_dict['tags'] = row[7]
-        
-        vulns.append(vuln_dict)
-    
-    conn.close()
-    return vulns
-
-# 获取周数和日期格式
-def get_week_date_format(date=None):
-    if date is None:
-        date = datetime.now(UTC).date()
-    
-    # 获取年份
-    year = date.strftime('%Y')
-    
-    # 获取周数（W格式）
-    week_number = date.strftime('%W')
-    
-    # 获取月日格式（MMDD）
-    mmdd = date.strftime('%m%d')
-    
-    return f"{year}/W{week_number}-{mmdd}"
+    return db_manager.get_today_vulnerabilities()
 
 # 创建目录结构
 def create_directory_structure(dir_path):
-    # 使用exist_ok=True参数，确保即使父目录不存在也能正确创建，且目录已存在时不会抛出异常
-    os.makedirs(dir_path, exist_ok=True)
-    logger.info(f"创建或确认目录存在: {dir_path}")
+    return FileHelper.ensure_directory_exists(dir_path)
 
 # 生成漏洞报告markdown
 def generate_vulnerability_report(vulns):

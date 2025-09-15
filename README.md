@@ -117,6 +117,13 @@
 ## 💾 报告存储格式
 
 项目会自动生成每日漏洞报告，并按照以下目录结构存储：
+
+**存在POC的漏洞报告：**
+```
+pocData/YYYY/W-WWDD/daily.md
+```
+
+**不存在POC的漏洞报告：**
 ```
 data/YYYY/W-WWDD/daily.md
 ```
@@ -125,7 +132,9 @@ data/YYYY/W-WWDD/daily.md
 - **WW**: 周数，例如：37
 - **DD**: 日期，例如：13
 
-示例路径：`data/2025/W37-0913/daily.md`
+示例路径：
+- 存在POC: `pocData/2025/W37-0913/daily.md`
+- 不存在POC: `data/2025/W37-0913/daily.md`
 
 生成的报告包含当天所有高危漏洞的详细信息，按CVSS评分分组展示。
 
@@ -134,7 +143,7 @@ data/YYYY/W-WWDD/daily.md
 当发现新的漏洞时，系统会自动将报告打包并发布为GitHub Release：
 
 - **Tag格式**：`YYYY-MM-DD_DailyPush`（例如：`2025-09-13_DailyPush`）
-- **打包内容**：`data/`目录下的所有文件，以`tar.gz`格式压缩
+- **打包内容**：`pocData/`和`data/`目录下的所有文件，以`tar.gz`格式压缩
 - **访问方式**：可在项目的Releases页面下载完整报告包
 
 这一功能使得漏洞报告可以长期保存，方便用户随时查阅历史漏洞信息。

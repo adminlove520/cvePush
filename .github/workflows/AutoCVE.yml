@@ -127,7 +127,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vulnerability-reports
-          path: data/**/*.md  # 上传所有生成的报告文件
+          path: |
+            pocData/**/*.md
+            data/**/*.md
+            !pocData/**/daily.md
+            !data/**/daily.md  # 上传所有生成的报告文件
           retention-days: 30
 
       - name: Generate release tag
@@ -142,12 +146,18 @@ jobs:
       - name: Package data directory
         if: env.new_vulns == 'true'
         run: |
-          # 确保data目录存在
-          if [ -d "data" ]; then
-            # 打包data目录为tar.gz格式
+          # 确保至少有一个目录存在
+          if [ -d "data" ] || [ -d "pocData" ]; then
+            # 打包data和pocData目录为tar.gz格式
             TODAY=$(date -u +'%Y-%m-%d')
             ARCHIVE_NAME="cve-reports-${TODAY}.tar.gz"
-            tar -czf "${ARCHIVE_NAME}" data/
+            # 创建一个临时目录用于打包
+            mkdir -p temp_archive
+            # 复制data和pocData目录到临时目录
+            if [ -d "data" ]; then cp -r data temp_archive/; fi
+            if [ -d "pocData" ]; then cp -r pocData temp_archive/; fi
+            # 打包临时目录下的内容
+            tar -czf "${ARCHIVE_NAME}" -C temp_archive .
             echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
             echo "Packaged data directory into ${ARCHIVE_NAME}"
           else

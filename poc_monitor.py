@@ -14,10 +14,23 @@ from datetime import datetime, timedelta, UTC
 import hashlib
 from pathlib import Path
 
+# 导入工具包
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from utils import (
+    db_manager,
+    get_cve_info_from_db,
+    DateHelper,
+    FileHelper,
+    CacheHelper,
+    TranslationHelper,
+    translate
+)
+
 # 基本配置
 DB_PATH = 'vulns.db'  # 数据库文件路径
 CONFIG_FILE = 'config.yaml'  # 配置文件路径
-DATA_DIR = 'data'  # 数据存储目录
+POC_DATA_DIR = 'pocData'  # 存在POC的报告存储目录
+NO_POC_DATA_DIR = 'data'  # 不存在POC的报告存储目录
 
 # 日志配置
 logger = logging.getLogger("PocMonitor")
@@ -65,77 +78,6 @@ def load_config():
             }
         }
 
-# 创建缓存目录
-def ensure_cache_dir(cache_dir):
-    if not os.path.exists(cache_dir):
-        try:
-            os.makedirs(cache_dir)
-            logger.info(f"创建缓存目录: {cache_dir}")
-        except Exception as e:
-            logger.error(f"创建缓存目录失败: {str(e)}")
-            return False
-    return True
-
-# 生成缓存文件名
-def get_cache_filename(url):
-    # 使用URL的MD5哈希值作为缓存文件名
-    md5_hash = hashlib.md5(url.encode()).hexdigest()
-    return f"{md5_hash}.json"
-
-# 检查缓存是否有效
-def is_cache_valid(cache_file, timeout):
-    if not os.path.exists(cache_file):
-        return False
-    
-    # 检查缓存文件的修改时间
-    cache_time = os.path.getmtime(cache_file)
-    current_time = time.time()
-    
-    return (current_time - cache_time) < timeout
-
-# 从URL获取JSON数据（带缓存）
-def fetch_json_data(url, config):
-    cache_config = config.get('cache', {})
-    use_cache = cache_config.get('enabled', True)
-    cache_dir = cache_config.get('cache_dir', '.cache')
-    cache_timeout = cache_config.get('cache_timeout', 3600)
-    
-    # 替换URL中的日期占位符
-    today = datetime.now(UTC).strftime('%Y-%m-%d')
-    url = url.replace('{date}', today)
-    
-    # 如果启用缓存，检查缓存
-    if use_cache and ensure_cache_dir(cache_dir):
-        cache_file = os.path.join(cache_dir, get_cache_filename(url))
-        if is_cache_valid(cache_file, cache_timeout):
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    logger.info(f"使用缓存数据: {url}")
-                    return json.load(f)
-            except Exception as e:
-                logger.warning(f"读取缓存文件失败: {str(e)}")
-    
-    # 从URL获取数据
-    try:
-        logger.info(f"从URL获取数据: {url}")
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        # 保存到缓存
-        if use_cache and ensure_cache_dir(cache_dir):
-            cache_file = os.path.join(cache_dir, get_cache_filename(url))
-            try:
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    json.dump(data, f)
-            except Exception as e:
-                logger.warning(f"保存缓存文件失败: {str(e)}")
-                
-        return data
-    except Exception as e:
-        logger.error(f"获取URL数据失败: {str(e)}")
-        return None
-
 # 从所有数据源搜索CVE的POC信息
 def search_poc_for_cve(cve_id, config):
     results = []
@@ -154,7 +96,7 @@ def search_poc_for_cve(cve_id, config):
         logger.info(f"搜索CVE {cve_id} 在数据源: {source_name}")
         
         # 获取数据源数据
-        data = fetch_json_data(source_url, config)
+        data = CacheHelper.fetch_json_with_cache(source_url, config)
         if not data:
             continue
         
@@ -221,38 +163,47 @@ def is_cve_match(cve_id, item):
     
     return cve_id_lower in name or cve_id_lower in full_name or cve_id_lower in description
 
-# 从数据库获取CVE信息
-def get_cve_info_from_db(cve_id):
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, published_date, cvss_score, description, vector_string, refs FROM vulns WHERE id = ?", (cve_id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return {
-                'id': row[0],
-                'published_date': row[1],
-                'cvss_score': row[2],
-                'description': row[3],
-                'vector_string': row[4],
-                'refs': row[5]
-            }
-        else:
-            logger.warning(f"CVE {cve_id} 未在数据库中找到")
-            return None
-    except Exception as e:
-        logger.error(f"从数据库获取CVE信息失败: {str(e)}")
-        return None
-
 # 生成单个CVE的markdown报告
-def generate_cve_markdown(cve_info, poc_results):
+def generate_cve_markdown(cve_info, poc_results, has_poc):
     if not cve_info:
         return None
     
-    # 翻译描述（如果需要）
-    translated_description = cve_info['description']
+    # 使用CVE_PushService的翻译逻辑进行翻译
+    original_description = cve_info['description']
+    try:
+        translated_description = translate(original_description)
+    except Exception as e:
+        logger.error(f"翻译失败: {str(e)}")
+        translated_description = original_description
+    
+    # 获取原始标签信息
+    original_tags = cve_info.get('tags', '未分类')
+    
+    # 根据是否存在POC调整漏洞分类标签
+    if has_poc:
+        # 存在POC的情况，添加(存在poc/exp)标签
+        tags_list = original_tags.split(',')
+        updated_tags = []
+        severity_found = False
+        
+        for tag in tags_list:
+            if tag == '严重':
+                updated_tags.append(f"{tag}(存在poc/exp)")
+                severity_found = True
+            elif tag == '高危':
+                updated_tags.append(f"{tag}(存在poc/exp)")
+                severity_found = True
+            else:
+                updated_tags.append(tag)
+        
+        # 如果没有严重/高危标签，添加通用的(存在poc/exp)标签
+        if not severity_found:
+            updated_tags.append('存在poc/exp')
+        
+        vulnerability_classification = ", ".join(list(set(updated_tags)))
+    else:
+        # 不存在POC的情况，沿用原始标签
+        vulnerability_classification = original_tags
     
     # 生成报告内容
     markdown_content = f"""
@@ -262,16 +213,19 @@ def generate_cve_markdown(cve_info, poc_results):
 
 **发布时间**: {cve_info['published_date']}
 **攻击向量**: {cve_info['vector_string']}
-**漏洞分类**: 存在poc/exp
+**漏洞分类**: {vulnerability_classification}
 
 ## 漏洞描述
 
+### 英文原文
+{original_description}
+
+### 中文译文
 {translated_description}
 
 ## 相关链接
 
-{cve_info['refs']}
-"""
+{cve_info['refs']}"""
     
     # 添加在野利用部分
     if poc_results:
@@ -284,44 +238,34 @@ def generate_cve_markdown(cve_info, poc_results):
     
     # 添加报告尾部
     markdown_content += """
+
 ---
 *本报告由 POC Monitor 自动生成*"""
     
     return markdown_content
 
 # 保存CVE报告
-def save_cve_report(cve_id, content):
+def save_cve_report(cve_id, content, has_poc):
     if not content:
         return None
     
+    # 根据是否有POC选择不同的存储目录
+    data_dir = POC_DATA_DIR if has_poc else NO_POC_DATA_DIR
+    
     # 获取日期格式并创建目录
-    today = datetime.now(UTC).strftime('%Y-%m-%d')
-    dir_path = os.path.join(DATA_DIR, '2025', get_week_date_format())
-    if not os.path.exists(dir_path):
-        try:
-            os.makedirs(dir_path)
-            logger.info(f"创建目录: {dir_path}")
-        except Exception as e:
-            logger.error(f"创建目录失败: {str(e)}")
-            return None
+    year = datetime.now(UTC).strftime('%Y')
+    week_format = DateHelper.get_simple_week_date_format()
+    dir_path = os.path.join(data_dir, year, week_format)
+    
+    # 确保目录存在
+    if not FileHelper.ensure_directory_exists(dir_path):
+        return None
     
     # 保存为文件
     file_path = os.path.join(dir_path, f'{cve_id}.md')
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        logger.info(f"CVE报告已保存到: {file_path}")
+    if FileHelper.write_file(file_path, content):
         return file_path
-    except Exception as e:
-        logger.error(f"保存CVE报告失败: {str(e)}")
-        return None
-
-# 获取周日期格式（参考原项目的格式）
-def get_week_date_format():
-    now = datetime.now(UTC)
-    week_number = now.strftime('%W')
-    date_str = now.strftime('%m%d')
-    return f"W{week_number}-{date_str}"
+    return None
 
 # 处理单个CVE
 def process_single_cve(cve_id):
@@ -329,7 +273,7 @@ def process_single_cve(cve_id):
     config = load_config()
     
     # 从数据库获取CVE信息
-    cve_info = get_cve_info_from_db(cve_id)
+    cve_info = db_manager.get_cve_info(cve_id)
     if not cve_info:
         logger.error(f"无法处理CVE {cve_id}，数据库中未找到该漏洞信息")
         return False
@@ -337,10 +281,13 @@ def process_single_cve(cve_id):
     # 搜索POC信息
     poc_results = search_poc_for_cve(cve_id, config)
     
+    # 确定是否存在POC
+    has_poc = len(poc_results) > 0
+    
     # 生成并保存报告
-    markdown_content = generate_cve_markdown(cve_info, poc_results)
+    markdown_content = generate_cve_markdown(cve_info, poc_results, has_poc)
     if markdown_content:
-        file_path = save_cve_report(cve_id, markdown_content)
+        file_path = save_cve_report(cve_id, markdown_content, has_poc)
         return file_path is not None
     
     return False
@@ -357,9 +304,12 @@ def process_today_vulns():
     
     try:
         # 读取标志文件
-        with open(flag_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+        content = FileHelper.read_file(flag_file)
+        if not content:
+            logger.warning("new_vulns.flag文件为空")
+            return False
         
+        lines = content.split('\n')
         if len(lines) < 2:
             logger.warning("new_vulns.flag文件格式不正确")
             return False

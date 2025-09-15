@@ -122,7 +122,9 @@ jobs:
         with:
           name: poc-reports
           path: |
+            pocData/**/*.md
             data/**/*.md
+            !pocData/**/daily.md
             !data/**/daily.md
           retention-days: 30
 
