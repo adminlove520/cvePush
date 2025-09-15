@@ -75,7 +75,7 @@ jobs:
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
           PUSH_MODE: ${{ inputs.push_mode }}
         run:
-          python CVE_PushService.py
+          python main.py daily
 
       - name: Check if new_vulns.flag file exists
         id: check-flag

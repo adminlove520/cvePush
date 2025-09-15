@@ -93,12 +93,12 @@ jobs:
       - name: Run POC Monitor for specific CVE (if provided)
         if: ${{ inputs.cve_id != '' }}
         run: |
-          python poc_monitor.py ${{ inputs.cve_id }}
+          python main.py cve ${{ inputs.cve_id }}
 
       - name: Run POC Monitor for today's vulnerabilities (if flag exists)
         if: ${{ inputs.cve_id == '' && env.flag_exists == 'true' }}
         run: |
-          python poc_monitor.py
+          python main.py daily --poc-only
 
       - name: Run POC Monitor (fallback - process all recent vulnerabilities)
         if: ${{ inputs.cve_id == '' && env.flag_exists == 'false' }}
@@ -115,7 +115,7 @@ jobs:
             touch data/db/new_vulns.flag
             echo "$(wc -l < recent_vulns.txt)" > data/db/new_vulns.flag
             cat recent_vulns.txt >> data/db/new_vulns.flag
-            python poc_monitor.py
+            python main.py daily --poc-only
           else
             echo "No recent vulnerabilities found to process"
           fi

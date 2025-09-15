@@ -1,5 +1,28 @@
-requests>=2.31.0
-serverchan_sdk
-python-dotenv>=1.0.0
-pyyaml>=6.0.1
-pytz>=2023.3.post1
+# CVE_PushService 重构版 - 依赖包列表
+# 核心依赖
+requests>=2.31.0          # HTTP请求库
+pandas>=2.0.3             # 数据处理
+numpy>=1.25.2             # 数值计算
+python-dateutil>=2.8.2    # 日期处理
+
+# 配置和工具
+pyyaml>=6.0.1             # YAML解析
+python-dotenv>=1.0.0      # 环境变量加载
+pytz>=2023.3.post1        # 时区处理
+
+# 缓存管理
+cachetools>=5.3.1         # 缓存工具
+
+# 文档和报告生成
+jinja2>=3.1.2             # 模板引擎
+markdown>=3.4.4           # Markdown处理
+
+# 通知功能
+pydantic>=2.2.1           # 数据验证
+
+# 工具库
+tqdm>=4.65.0              # 进度条
+rich>=13.5.2              # 终端美化输出
+
+# 翻译功能 (可选)
+googletrans>=4.0.0-rc1    # Google翻译
