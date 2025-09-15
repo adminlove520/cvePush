@@ -13,7 +13,7 @@ vulns.db
 .env.development.local
 .env.test.local
 .env.production.local
-config.example.yaml
+config.yaml
 
 # Python编译文件
 __pycache__/

@@ -39,10 +39,18 @@ jobs:
           mkdir -p data/db
           mkdir -p data/cache
           
-      - name: Get current year
-        id: get-year
+      - name: Get current time
+        uses: gerred/actions/current-time@master
+        id: current-time
+        with:
+          format: 'YYYY'
+          
+      - name: Set current year to environment
+        env:
+          TIME: "${{ steps.current-time.outputs.time }}"
         run: |
-          echo "CURRENT_YEAR=$(date +'%Y')" >> $GITHUB_ENV
+          echo "CURRENT_YEAR=${TIME}" >> $GITHUB_ENV
+      
       - name: Check if file already exists
         id: check-file
         env:
