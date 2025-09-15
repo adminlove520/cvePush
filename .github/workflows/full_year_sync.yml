@@ -1,0 +1,111 @@
+name: FullYearDataSync
+
+on:
+  schedule:
+    - cron: '40 15 * * *'  # 每天UTC时间15:40执行（北京时间23:40）
+  workflow_dispatch:     # 支持手动触发
+    inputs:
+      year:
+        description: '指定要同步数据的年份（留空则同步当前年份）'
+        required: false
+        type: number
+      force_update:
+        description: '是否强制更新已存在的数据文件'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  sync-full-year-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # 设置超时时间为60分钟，防止长时间运行
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          
+      - name: Ensure data directories exist
+        run: |
+          mkdir -p data/db
+          mkdir -p data/cache
+          
+      - name: Get current time
+        uses: gerred/actions/current-time@master
+        id: current-time
+        with:
+          format: 'YYYY'
+          
+      - name: Set current year to environment
+        env:
+          TIME: "${{ steps.current-time.outputs.time }}"
+        run: |
+          echo "CURRENT_YEAR=${TIME}" >> $GITHUB_ENV
+      
+      - name: Check if file already exists
+        id: check-file
+        env:
+          YEAR: ${{ inputs.year || env.CURRENT_YEAR }}
+        run: |
+          FILE_PATH="data/db/nvdData_${YEAR}.md"
+          if [ -f "$FILE_PATH" ]; then
+            echo "file_exists=true" >> $GITHUB_ENV
+            echo "File $FILE_PATH already exists."
+          else
+            echo "file_exists=false" >> $GITHUB_ENV
+            echo "File $FILE_PATH does not exist."
+          fi
+          
+      - name: Sync full year data
+        id: sync-data
+        env:
+          YEAR: ${{ inputs.year || env.CURRENT_YEAR }}
+        run: |
+          # 如果文件已存在且不是强制更新，则跳过
+          if [ "${{ env.file_exists }}" = "true" ] && [ "${{ inputs.force_update }}" = "false" ]; then
+            echo "File already exists and force_update is false. Skipping data sync."
+            echo "skipped=true" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          # 准备命令参数
+          CMD_ARGS="full-year"
+          if [ -n "$YEAR" ]; then
+            CMD_ARGS="$CMD_ARGS --year $YEAR"
+          fi
+
+          echo "Running command: python main.py $CMD_ARGS"
+          python main.py $CMD_ARGS
+
+          # 检查执行结果
+          if [ $? -eq 0 ]; then
+            echo "sync_success=true" >> $GITHUB_ENV
+            echo "Data sync completed successfully."
+          else
+            echo "sync_success=false" >> $GITHUB_ENV
+            echo "Data sync failed." >&2
+            exit 1
+          fi
+          
+      - name: Upload data file as artifact
+        if: env.sync_success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-year-data-${{ inputs.year || env.CURRENT_YEAR }}
+          path: data/db/nvdData_*.md
+          retention-days: 30
+          
+      - name: Log failure
+        if: failure()
+        run: |
+          echo "Full year data sync failed for year ${{ inputs.year || env.CURRENT_YEAR }}"
+          echo "Please check the workflow logs for details."

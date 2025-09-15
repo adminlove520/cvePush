@@ -85,7 +85,7 @@ class CVEProcessor:
             if field in cve_data and cve_data[field]:
                 try:
                     # 尝试解析各种日期格式
-                    date_obj = date_helper.parse_date(cve_data[field])
+                    date_obj = date_helper.parse_datetime(cve_data[field])
                     if date_obj:
                         cve_data[field] = date_obj.isoformat()
                 except Exception as e:
@@ -110,11 +110,10 @@ class CVEProcessor:
                     
                     # 如果源语言不是目标语言，进行翻译
                     if source_lang != self.default_language:
-                        translated = translation_helper.translate_text(
-                            description,
-                            source_lang,
-                            self.default_language
-                        )
+                        translated = translation_helper.translate(
+                                description,
+                                self.default_language
+                            )
                         if translated:
                             cve_data['translated_description'] = translated
                             logger.debug(f"已翻译CVE描述: {cve_data.get('id', '未知')}")

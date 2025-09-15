@@ -1,11 +1,11 @@
 API:
   github:
-    token: 'YOUR_GITHUB_TOKEN_HERE'
+    token: ''
 NOTIFICATION:
   dingtalk:
     enabled: true
-    secret_key: 'YOUR_DINGTALK_SECRET_HERE'
-    webhook_url: 'YOUR_DINGTALK_WEBHOOK_HERE'
+    secret_key: ''
+    webhook_url: ''
   email:
     enabled: false
     password: ''
