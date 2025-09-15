@@ -98,6 +98,13 @@ jobs:
           path: data/db/new_vulns.flag
           retention-days: 1  # 只保留1天，因为只用于后续工作流
 
+      - name: Upload updated database
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulns-db
+          path: data/db/vulns.db
+          retention-days: 7  # 保留7天，足够后续工作流使用
+
       - name: Check if new vulnerabilities were found
         id: check_vulns
         run: |

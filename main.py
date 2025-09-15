@@ -48,8 +48,8 @@ def init_app() -> None:
         sys.exit(1)
     
     # 初始化数据库
-    db_manager.init_db()
-    
+    db_manager.ensure_table_exists()
+
     logger.info(f"{settings.get('APP.name', 'CVE_PushService')} v{settings.get('APP.version', '1.0.0')} 已启动")
 
 def process_single_cve(cve_id: str) -> None:
