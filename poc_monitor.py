@@ -27,8 +27,8 @@ from utils import (
 )
 
 # 基本配置
-DB_PATH = 'vulns.db'  # 数据库文件路径
-CONFIG_FILE = 'config.yaml'  # 配置文件路径
+DB_PATH = os.path.join('data', 'db', 'vulns.db')  # 数据库文件路径
+CONFIG_FILE = os.path.join('config', 'config.yaml')  # 配置文件路径
 POC_DATA_DIR = 'pocData'  # 存在POC的报告存储目录
 NO_POC_DATA_DIR = 'data'  # 不存在POC的报告存储目录
 
@@ -295,7 +295,7 @@ def process_single_cve(cve_id):
 # 处理当日所有新漏洞
 # （通过检查new_vulns.flag文件来获取当日新发现的漏洞）
 def process_today_vulns():
-    flag_file = "new_vulns.flag"
+    flag_file = os.path.join('data', 'db', 'new_vulns.flag')
     
     # 检查是否存在标志文件
     if not os.path.exists(flag_file):

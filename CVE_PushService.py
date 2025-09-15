@@ -48,8 +48,8 @@ EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 # 推送模式配置 (all, serverchan, dingtalk, email)
 PUSH_MODE = os.getenv("PUSH_MODE", "dingtalk").lower()
 
-DB_PATH = 'vulns.db'  # 数据库文件路径
-LOG_FILE = 'cveflows.log'  # 日志文件前缀
+DB_PATH = os.path.join('data', 'db', 'vulns.db')  # 数据库文件路径
+LOG_FILE = os.path.join('logs', 'cveflows.log')  # 日志文件前缀
 DATA_DIR = 'data'  # 数据存储目录
 CVSS_THRESHOLD = 7.0  # 只关注CVSS>=7.0的高危漏洞
 
@@ -592,7 +592,8 @@ def save_vulnerability_report():
         
         # 生成新漏洞标记文件，用于触发POC监控
         cve_ids = [vuln['id'] for vuln in vulns]
-        with open("new_vulns.flag", "w", encoding="utf-8") as f:
+        new_vulns_flag_path = os.path.join('data', 'db', 'new_vulns.flag')
+        with open(new_vulns_flag_path, "w", encoding="utf-8") as f:
             f.write(f"{len(cve_ids)}\n")  # 第一行是漏洞数量
             f.write("\n".join(cve_ids))  # 后续每行一个CVE ID
         
@@ -635,7 +636,8 @@ def main():
     logger.info(f"[INFO] Monitoring completed. Found {new_vulns} new vulnerabilities.")
 
     if new_vulns > 0:
-        with open("new_vulns.flag", "w") as f:
+        new_vulns_flag_path = os.path.join('data', 'db', 'new_vulns.flag')
+        with open(new_vulns_flag_path, "w") as f:
             f.write(f"{new_vulns}\n")
             f.write("\n".join(new_ids))
 

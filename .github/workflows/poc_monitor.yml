@@ -35,17 +35,20 @@ jobs:
           pip install -r requirements.txt
           pip install pyyaml requests
 
+      - name: Ensure data/db directory exists
+        run: mkdir -p data/db
+
       - name: Download latest database
         uses: actions/download-artifact@v4
         with:
           name: vulns-db
-          path: .  # 下载到工作目录
+          path: data/db  # 下载到data/db目录
         continue-on-error: true  # 如果没有数据库文件，忽略错误
 
       - name: Check if database file exists
         id: check-db
         run: |
-          if [ -f vulns.db ]; then
+          if [ -f data/db/vulns.db ]; then
             echo "Found database file"
             echo "db_exists=true" >> $GITHUB_ENV
           else
@@ -57,13 +60,13 @@ jobs:
         if: env.db_exists == 'false'
         run: |
           echo "Creating empty database file..."
-          python -c "import sqlite3; conn = sqlite3.connect('vulns.db'); conn.close()"
+          python -c "import sqlite3; conn = sqlite3.connect('data/db/vulns.db'); conn.close()"
           echo "Empty database file created successfully."
 
       - name: Check for new vulnerabilities flag file
         id: check-flag-file
         run: |
-          if [ -f new_vulns.flag ]; then
+          if [ -f data/db/new_vulns.flag ]; then
             echo "Found new_vulns.flag file"
             echo "flag_exists=true" >> $GITHUB_ENV
           else
@@ -76,13 +79,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: new-vulns-flag
-          path: .
+          path: data/db
         continue-on-error: true
 
       - name: Check again for new_vulns.flag
         if: env.flag_exists == 'false'
         run: |
-          if [ -f new_vulns.flag ]; then
+          if [ -f data/db/new_vulns.flag ]; then
             echo "Found new_vulns.flag file after download"
             echo "flag_exists=true" >> $GITHUB_ENV
           fi
@@ -108,9 +111,10 @@ jobs:
           if [ -s recent_vulns.txt ]; then
             echo "Found $(wc -l < recent_vulns.txt) recent vulnerabilities"
             mkdir -p .cache
-            touch new_vulns.flag
-            echo "$(wc -l < recent_vulns.txt)" > new_vulns.flag
-            cat recent_vulns.txt >> new_vulns.flag
+            mkdir -p data/db
+            touch data/db/new_vulns.flag
+            echo "$(wc -l < recent_vulns.txt)" > data/db/new_vulns.flag
+            cat recent_vulns.txt >> data/db/new_vulns.flag
             python poc_monitor.py
           else
             echo "No recent vulnerabilities found to process"

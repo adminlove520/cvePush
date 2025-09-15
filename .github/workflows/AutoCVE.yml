@@ -38,13 +38,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: vulns-db
-          path: .  # 下载到工作目录
+          path: data/db  # 下载到data/db目录
         continue-on-error: true  # 忽略下载失败
+
+      - name: Ensure data/db directory exists
+        run: mkdir -p data/db
 
       - name: Check if database file exists after download
         id: check-db-file
         run: |
-          if [ -f vulns.db ]; then
+          if [ -f data/db/vulns.db ]; then
             echo "Found existing database file"
             echo "db_exists=true" >> $GITHUB_ENV
           else
@@ -57,7 +60,7 @@ jobs:
         run: |
           # 创建一个空的数据库文件，避免程序因缺少数据库文件而报错
           echo "Creating empty database file..."
-          python -c "import sqlite3; conn = sqlite3.connect('vulns.db'); conn.close()"
+          python -c "import sqlite3; conn = sqlite3.connect('data/db/vulns.db'); conn.close()"
           echo "Empty database file created successfully."
 
       - name: Run CVE Push Service script
@@ -77,11 +80,11 @@ jobs:
       - name: Check if new_vulns.flag file exists
         id: check-flag
         run: |
-          if [ -f new_vulns.flag ]; then
+          if [ -f data/db/new_vulns.flag ]; then
             echo "Found new_vulns.flag file"
             echo "new_vulns_flag_exists=true" >> $GITHUB_ENV
             # 读取flag文件内容，设置环境变量用于后续步骤
-            echo "VULN_COUNT=$(head -n 1 new_vulns.flag)" >> $GITHUB_ENV
+            echo "VULN_COUNT=$(head -n 1 data/db/new_vulns.flag)" >> $GITHUB_ENV
           else
             echo "Warning: new_vulns.flag file not found!"
             echo "new_vulns_flag_exists=false" >> $GITHUB_ENV
@@ -92,16 +95,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: new-vulns-flag
-          path: new_vulns.flag
+          path: data/db/new_vulns.flag
           retention-days: 1  # 只保留1天，因为只用于后续工作流
 
       - name: Check if new vulnerabilities were found
         id: check_vulns
         run: |
-          if [ -f new_vulns.flag ]; then
+          if [ -f data/db/new_vulns.flag ]; then
             echo "new_vulns=true" >> $GITHUB_ENV
             echo "---- New Vulnerabilities Found ----"
-            cat new_vulns.flag
+            cat data/db/new_vulns.flag
             echo "-----------------------------------"
           else
             echo "new_vulns=false" >> $GITHUB_ENV
@@ -119,7 +122,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vulns-db
-          path: vulns.db  # 上传当前数据库
+          path: data/db/vulns.db  # 上传当前数据库
           retention-days: 7
           
       - name: Upload daily vulnerability report
