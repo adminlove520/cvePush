@@ -779,6 +779,14 @@ def save_vulnerability_report():
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(markdown_content)
         logger.info(f"漏洞报告已保存到: {file_path}")
+        
+        # 生成新漏洞标记文件，用于触发POC监控
+        cve_ids = [vuln['id'] for vuln in vulns]
+        with open("new_vulns.flag", "w", encoding="utf-8") as f:
+            f.write(f"{len(cve_ids)}\n")  # 第一行是漏洞数量
+            f.write("\n".join(cve_ids))  # 后续每行一个CVE ID
+        
+        logger.info(f"成功生成新漏洞标记文件，共{len(cve_ids)}个漏洞")
         return file_path
     except Exception as e:
         logger.error(f"保存漏洞报告失败: {str(e)}")

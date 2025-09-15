@@ -1,0 +1,26 @@
+# POC监控数据源配置
+sources:
+  - name: Poc-Monitor_v1.0.1_update
+    url: "https://raw.githubusercontent.com/adminlove520/Poc-Monitor_v1.0.1/main/update.json"
+    type: "json"
+    priority: 1
+    enabled: true
+    
+  - name: Poc-Monitor_v1.0.1_daily
+    url: "https://raw.githubusercontent.com/adminlove520/Poc-Monitor_v1.0.1/main/dateLog/{date}.json"
+    type: "json"
+    priority: 2
+    enabled: true
+    
+# 缓存配置
+cache:
+  enabled: true
+  cache_dir: ".cache"
+  cache_timeout: 3600  # 缓存有效期（秒）
+
+# 日志配置
+logging:
+  level: "INFO"
+  file: "poc_monitor.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5

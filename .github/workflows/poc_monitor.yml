@@ -1,0 +1,134 @@
+name: POC Monitor
+
+on:
+  # 在AutoCVE工作流完成后触发
+  workflow_run:
+    workflows: ["AutoCVE"]
+    types:
+      - completed
+  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      cve_id:
+        description: '指定要处理的CVE ID（留空则处理当日所有新漏洞）'
+        required: false
+        type: string
+  # 定时触发（作为备用）
+  schedule:
+    - cron: '30 0 * * *'  # 每天 UTC 0:30 执行（大约在AutoCVE工作流完成后）
+
+jobs:
+  run-poc-monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyyaml requests
+
+      - name: Download latest database
+        uses: actions/download-artifact@v4
+        with:
+          name: vulns-db
+          path: .  # 下载到工作目录
+        continue-on-error: true  # 如果没有数据库文件，忽略错误
+
+      - name: Check if database file exists
+        id: check-db
+        run: |
+          if [ -f vulns.db ]; then
+            echo "Found database file"
+            echo "db_exists=true" >> $GITHUB_ENV
+          else
+            echo "Warning: Database file not found!"
+            echo "db_exists=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create empty database if not found
+        if: env.db_exists == 'false'
+        run: |
+          echo "Creating empty database file..."
+          python -c "import sqlite3; conn = sqlite3.connect('vulns.db'); conn.close()"
+          echo "Empty database file created successfully."
+
+      - name: Check for new vulnerabilities flag file
+        id: check-flag-file
+        run: |
+          if [ -f new_vulns.flag ]; then
+            echo "Found new_vulns.flag file"
+            echo "flag_exists=true" >> $GITHUB_ENV
+          else
+            echo "Warning: new_vulns.flag file not found!"
+            echo "flag_exists=false" >> $GITHUB_ENV
+          fi
+
+      - name: Download new_vulns.flag from artifacts (if available)
+        if: env.flag_exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: new-vulns-flag
+          path: .
+        continue-on-error: true
+
+      - name: Check again for new_vulns.flag
+        if: env.flag_exists == 'false'
+        run: |
+          if [ -f new_vulns.flag ]; then
+            echo "Found new_vulns.flag file after download"
+            echo "flag_exists=true" >> $GITHUB_ENV
+          fi
+
+      - name: Run POC Monitor for specific CVE (if provided)
+        if: ${{ inputs.cve_id != '' }}
+        run: |
+          python poc_monitor.py ${{ inputs.cve_id }}
+
+      - name: Run POC Monitor for today's vulnerabilities (if flag exists)
+        if: ${{ inputs.cve_id == '' && env.flag_exists == 'true' }}
+        run: |
+          python poc_monitor.py
+
+      - name: Run POC Monitor (fallback - process all recent vulnerabilities)
+        if: ${{ inputs.cve_id == '' && env.flag_exists == 'false' }}
+        run: |
+          echo "No new_vulns.flag file found, trying to process recent vulnerabilities..."
+          # 获取最近24小时内添加的漏洞ID
+          python -c "import sqlite3, time, datetime; conn = sqlite3.connect('vulns.db'); c = conn.cursor(); c.execute(\"SELECT id FROM vulns WHERE published_date >= ?\", [(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')]); vulns = c.fetchall(); conn.close(); print('\n'.join([v[0] for v in vulns]))" > recent_vulns.txt
+          
+          # 如果有最近的漏洞，处理它们
+          if [ -s recent_vulns.txt ]; then
+            echo "Found $(wc -l < recent_vulns.txt) recent vulnerabilities"
+            mkdir -p .cache
+            touch new_vulns.flag
+            echo "$(wc -l < recent_vulns.txt)" > new_vulns.flag
+            cat recent_vulns.txt >> new_vulns.flag
+            python poc_monitor.py
+          else
+            echo "No recent vulnerabilities found to process"
+          fi
+
+      - name: Upload POC reports as artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: poc-reports
+          path: |
+            data/**/*.md
+            !data/**/daily.md
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # 清理临时文件
+          rm -f recent_vulns.txt
+          echo "Cleanup completed"
