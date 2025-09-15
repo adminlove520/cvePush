@@ -3,7 +3,10 @@ import logging
 import time
 import hashlib
 import requests
+import os
 from datetime import datetime, UTC
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +16,12 @@ class CacheHelper:
     @staticmethod
     def get_cache_filename(url):
         """根据URL生成缓存文件名"""
-        # 使用URL的MD5哈希值作为文件名，确保唯一性
+        # 生成URL的哈希值
         url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
-        return f"{url_hash}.json"
+        
+        # 获取缓存目录
+        cache_dir = settings.get('CACHE.dir', os.path.join('data', 'cache'))
+        return os.path.join(cache_dir, f"{url_hash}.json")
     
     @staticmethod
     def is_cache_valid(cache_file, cache_timeout):
@@ -208,6 +214,29 @@ class CacheHelper:
         except Exception as e:
             logger.error(f"获取缓存数据失败: {str(e)}")
             return None
+
+    @staticmethod
+    def cache_data(cache_key, data):
+        """将数据缓存到文件"""
+        try:
+            # 使用默认缓存目录
+            cache_dir = settings.get('CACHE.dir', os.path.join('data', 'cache'))
+            cache_file = os.path.join(cache_dir, f"{cache_key}.json")
+            
+            # 确保缓存目录存在
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir)
+            
+            # 写入缓存文件
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                import json
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            logger.debug(f"数据已缓存到: {cache_file}")
+            return True
+        except Exception as e:
+            logger.error(f"缓存数据失败: {str(e)}")
+            return False
 
 # 创建默认实例
 cache_helper = CacheHelper()

@@ -4,8 +4,14 @@ import time
 import json
 import logging
 from typing import Dict, List, Optional, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# 定义UTC时区
+UTC = timezone.utc
 import xml.etree.ElementTree as ET
+import gzip
+import io
+import os
 
 from src.config import settings
 from src.utils.db_manager import db_manager
@@ -30,6 +36,10 @@ class CVECollector:
         # 重试设置
         self.max_retries = settings.get('POC_MONITOR.max_retries', 3)
         self.retry_interval = settings.get('POC_MONITOR.retry_interval', 5)
+        
+        # NVD数据feed URL
+        self.nvd_recent_feed_url = 'https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-recent.json.gz'
+        self.nvd_year_feed_url_template = 'https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{}.json.gz'
     
     def _throttle_request(self) -> None:
         """根据速率限制控制请求频率"""
@@ -115,7 +125,7 @@ class CVECollector:
         if not cve_id.startswith('CVE-'):
             cve_id = f'CVE-{cve_id}'
         
-        # 从数据库检查
+        # 1. 从数据库检查
         db_data = db_manager.get_cve_info(cve_id)
         if db_data:
             # 转换为字典格式
@@ -137,28 +147,60 @@ class CVECollector:
             logger.debug(f"从数据库获取CVE信息: {cve_id}")
             return cve_data
         
-        # 从NVD API获取（使用2.0版本的参数格式）
-        params = {'cveId': cve_id}
-        data = self._make_request(self.nvd_api_url, params=params)
-        
-        if data and 'result' in data and 'CVE_Items' in data['result'] and data['result']['CVE_Items']:
-            cve_item = data['result']['CVE_Items'][0]
-            # NVD API 2.0版本的响应格式可能有所不同，这里做兼容性处理
-            # 检查是完整的CVE项目还是已经提取过的数据
-            if 'cve' in cve_item and isinstance(cve_item['cve'], dict):
-                cve_data = self._parse_nvd_cve_item(cve_item)
-            elif 'id' in cve_item:
-                # 如果已经是提取好的数据格式，直接使用
-                cve_data = cve_item
-            else:
-                # 尝试使用新的解析方法
-                cve_data = self._parse_nvd_cve_item_v2(cve_item)
+        # 2. 从NVD的压缩数据feed中查找
+        try:
+            # 获取最近的CVE数据
+            recent_cves = self.fetch_nvd_data(use_recent=True)
             
-            # 保存到数据库
-            self._save_cve_to_db(cve_data)
+            # 在最近的数据中查找特定CVE
+            for cve_vuln in recent_cves:
+                if isinstance(cve_vuln, dict):
+                    # 检查数据结构
+                    if 'cve' in cve_vuln and isinstance(cve_vuln['cve'], dict):
+                        # 完整的数据结构
+                        if cve_vuln['cve'].get('CVE_data_meta', {}).get('ID') == cve_id:
+                            cve_data = self._parse_nvd_cve_item(cve_vuln)
+                            self._save_cve_to_db(cve_data)
+                            logger.info(f"从NVD数据feed获取CVE信息: {cve_id}")
+                            return cve_data
+                    elif cve_vuln.get('id') == cve_id:
+                        # 简化的数据结构
+                        self._save_cve_to_db(cve_vuln)
+                        logger.info(f"从NVD数据feed获取CVE信息: {cve_id}")
+                        return cve_vuln
             
-            logger.info(f"成功获取CVE信息: {cve_id}")
-            return cve_data
+            # 如果最近的数据中没有，尝试获取年度数据
+            year = cve_id.split('-')[1]
+            if year.isdigit():
+                # 构造年度数据URL
+                year_url = self.nvd_year_feed_url_template.format(year)
+                
+                try:
+                    logger.info(f"Fetching year data from: {year_url}")
+                    # 设置合适的请求头
+                    headers = {
+                        'User-Agent': settings.get('APP.user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                    }
+                    
+                    response = requests.get(year_url, stream=True, timeout=60, headers=headers)
+                    response.raise_for_status()
+
+                    with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as gz_file:
+                        year_data = json.loads(gz_file.read().decode('utf-8'))
+                        year_cves = year_data.get('vulnerabilities', [])
+                        
+                        # 在年度数据中查找特定CVE
+                        for cve_vuln in year_cves:
+                            if isinstance(cve_vuln, dict) and 'cve' in cve_vuln:
+                                if cve_vuln['cve'].get('CVE_data_meta', {}).get('ID') == cve_id:
+                                    cve_data = self._parse_nvd_cve_item(cve_vuln)
+                                    self._save_cve_to_db(cve_data)
+                                    logger.info(f"从NVD年度数据feed获取CVE信息: {cve_id}")
+                                    return cve_data
+                except Exception as e:
+                    logger.error(f"Failed to fetch NVD year data: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error fetching CVE from NVD feed: {str(e)}")
         
         logger.warning(f"未找到CVE信息: {cve_id}")
         return None
@@ -239,53 +281,118 @@ class CVECollector:
             Dict: 解析后的CVE信息
         """
         try:
-            # 基础信息 - API 2.0版本的结构
-            cve_id = cve_item.get('cve', {}).get('id', 'UNKNOWN')
+            # 适配不同的数据结构
+            # 从压缩feed中获取的数据结构
+            if isinstance(cve_item, dict) and 'cve' in cve_item:
+                # 基础信息
+                cve_id = cve_item['cve'].get('id', 'UNKNOWN')
+                logger.debug(f"解析CVE ID: {cve_id}")
+                
+                # 描述
+                descriptions = cve_item['cve'].get('descriptions', [])
+                description = descriptions[0].get('value', '') if descriptions else ''
+                # 尝试获取中文描述
+                for desc in descriptions:
+                    if desc.get('lang') == 'zh':
+                        description = desc.get('value', '')
+                        break
+                
+                # 严重性和CVSS评分
+                severity = 'UNKNOWN'
+                cvss_score = 0.0
+                
+                # 优先使用CVSS v3
+                metrics = cve_item['cve'].get('metrics', {})
+                
+                # 尝试从metrics中获取评分
+                if metrics:
+                    # 检查是否有V31评分
+                    if 'cvssMetricV31' in metrics and metrics['cvssMetricV31']:
+                        severity = metrics['cvssMetricV31'][0].get('baseSeverity', 'UNKNOWN')
+                        cvss_score = metrics['cvssMetricV31'][0].get('cvssData', {}).get('baseScore', 0.0)
+                    # 检查是否有V30评分
+                    elif 'cvssMetricV30' in metrics and metrics['cvssMetricV30']:
+                        severity = metrics['cvssMetricV30'][0].get('baseSeverity', 'UNKNOWN')
+                        cvss_score = metrics['cvssMetricV30'][0].get('cvssData', {}).get('baseScore', 0.0)
+                    # 检查是否有V2评分
+                    elif 'cvssMetricV2' in metrics and metrics['cvssMetricV2']:
+                        severity = metrics['cvssMetricV2'][0].get('baseSeverity', 'UNKNOWN')
+                        cvss_score = metrics['cvssMetricV2'][0].get('cvssData', {}).get('baseScore', 0.0)
+                
+                # 补充：如果通过metrics未获取到评分，尝试从cve对象的其他可能字段获取
+                if cvss_score == 0.0:
+                    # 检查cve_item中是否有直接的评分字段
+                    if 'cvss' in cve_item['cve']:
+                        cvss_data = cve_item['cve']['cvss']
+                        if isinstance(cvss_data, dict):
+                            if 'baseScore' in cvss_data:
+                                cvss_score = cvss_data['baseScore']
+                            if 'baseSeverity' in cvss_data:
+                                severity = cvss_data['baseSeverity']
+                
+                # 最后验证严重性和分数的一致性
+                if cvss_score > 0 and severity == 'UNKNOWN':
+                    # 根据CVSS分数推断严重性
+                    if cvss_score >= 9.0:
+                        severity = 'CRITICAL'
+                    elif cvss_score >= 7.0:
+                        severity = 'HIGH'
+                    elif cvss_score >= 4.0:
+                        severity = 'MEDIUM'
+                    elif cvss_score > 0:
+                        severity = 'LOW'
+                
+                # 如果通过metrics没有获取到评分，尝试从其他字段获取
+                if cvss_score == 0.0 and 'cvssMetricV31' not in metrics and 'cvssMetricV30' not in metrics and 'cvssMetricV2' not in metrics:
+                    logger.debug(f"尝试从其他字段获取评分: {cve_id}")
+                    # 有些CVE可能直接在cve对象中有评分信息
+                    if 'metrics' in cve_item['cve']:
+                        # 尝试其他可能的评分字段
+                        for metric_type, metric_list in cve_item['cve']['metrics'].items():
+                            if metric_list and isinstance(metric_list, list):
+                                # 检查是否有baseSeverity字段
+                                if 'baseSeverity' in metric_list[0]:
+                                    severity = metric_list[0]['baseSeverity']
+                                # 检查是否有baseScore字段
+                                if 'baseScore' in metric_list[0]:
+                                    cvss_score = metric_list[0]['baseScore']
+                                elif 'cvssData' in metric_list[0] and 'baseScore' in metric_list[0]['cvssData']:
+                                    cvss_score = metric_list[0]['cvssData']['baseScore']
+                                break
+                
+                # 日期信息 - 从正确的位置获取日期
+                published_date = cve_item.get('published', '')
+                last_modified_date = cve_item.get('lastModified', '')
+                
+                # 如果日期为空，尝试从其他位置获取
+                if not published_date:
+                    published_date = cve_item['cve'].get('published', '')
+                if not last_modified_date:
+                    last_modified_date = cve_item['cve'].get('lastModified', '')
+                
+                # 参考信息
+                references = []
+                ref_data = cve_item['cve'].get('references', [])
+                for ref in ref_data:
+                    references.append({
+                        'url': ref.get('url', ''),
+                        'source': ref.get('source', ''),
+                        'tags': ref.get('tags', [])
+                    })
+            else:
+                # 回退到旧的解析方式
+                logger.warning("无效的CVE数据结构")
+                cve_id = 'UNKNOWN'
+                description = ''
+                severity = 'UNKNOWN'
+                cvss_score = 0.0
+                published_date = ''
+                last_modified_date = ''
+                references = []
             
-            # 描述 - API 2.0版本的描述结构
-            descriptions = cve_item.get('cve', {}).get('descriptions', [])
-            description = descriptions[0].get('value', '') if descriptions else ''
-            # 尝试获取中文描述
-            for desc in descriptions:
-                if desc.get('lang') == 'zh':
-                    description = desc.get('value', '')
-                    break
+            logger.debug(f"CVE {cve_id} 解析完成: severity={severity}, score={cvss_score}")
             
-            # 严重性和CVSS评分 - API 2.0版本的评分结构
-            severity = 'UNKNOWN'
-            cvss_score = 0.0
-            
-            # 优先使用CVSS v3
-            metrics = cve_item.get('cve', {}).get('metrics', {})
-            if 'cvssMetricV31' in metrics and metrics['cvssMetricV31']:
-                cvss_data = metrics['cvssMetricV31'][0].get('cvssData', {})
-                severity = metrics['cvssMetricV31'][0].get('baseSeverity', 'UNKNOWN')
-                cvss_score = cvss_data.get('baseScore', 0.0)
-            elif 'cvssMetricV30' in metrics and metrics['cvssMetricV30']:
-                cvss_data = metrics['cvssMetricV30'][0].get('cvssData', {})
-                severity = metrics['cvssMetricV30'][0].get('baseSeverity', 'UNKNOWN')
-                cvss_score = cvss_data.get('baseScore', 0.0)
-            # 其次使用CVSS v2
-            elif 'cvssMetricV2' in metrics and metrics['cvssMetricV2']:
-                cvss_data = metrics['cvssMetricV2'][0].get('cvssData', {})
-                severity = metrics['cvssMetricV2'][0].get('baseSeverity', 'UNKNOWN')
-                cvss_score = cvss_data.get('baseScore', 0.0)
-            
-            # 日期信息 - API 2.0版本的日期字段
-            published_date = cve_item.get('published', '')
-            last_modified_date = cve_item.get('lastModified', '')
-            
-            # 参考信息 - API 2.0版本的参考结构
-            references = []
-            ref_data = cve_item.get('cve', {}).get('references', [])
-            for ref in ref_data:
-                references.append({
-                    'url': ref.get('url', ''),
-                    'source': ref.get('source', ''),
-                    'tags': ref.get('tags', [])
-                })
-            
-            # 构造返回数据（保持与原方法相同的结构）
+            # 构造返回数据
             return {
                 'id': cve_id,
                 'description': description,
@@ -304,7 +411,7 @@ class CVECollector:
             logger.error(f"解析NVD 2.0 API数据时出错: {str(e)}")
             # 返回基本结构，避免程序崩溃
             return {
-                'id': cve_item.get('cve', {}).get('id', 'UNKNOWN'),
+                'id': 'UNKNOWN',
                 'description': '解析错误',
                 'severity': 'UNKNOWN',
                 'published_date': '',
@@ -337,6 +444,8 @@ class CVECollector:
             if not end_date:
                 end_date = end.strftime('%Y-%m-%d')
         
+        logger.info(f"日期范围: {start_date} 到 {end_date}")
+        
         # 检查缓存
         cache_key = f'recent_cves_{start_date}_{end_date}'
         cached_data = cache_helper.get_cached_data(cache_key)
@@ -344,59 +453,128 @@ class CVECollector:
             logger.debug(f"从缓存获取最近CVE列表: {start_date} 到 {end_date}")
             return cached_data
         
-        # 从NVD API获取（使用2.0版本格式）
-        url = self.nvd_api_url
-        
-        # API 2.0版本的日期格式：ISO 8601
-        start_datetime = f"{start_date}T00:00:00.000"
-        end_datetime = f"{end_date}T23:59:59.999"
-        
-        params = {
-            'pubStartDate': start_datetime,
-            'pubEndDate': end_datetime,
-            'resultsPerPage': 1000  # 每页最大数量
-        }
+        # 使用基于文件下载的方法获取CVE数据
+        cve_items = self.fetch_nvd_data(use_recent=True)
         
         all_cves = []
-        start_index = 0
+        valid_count = 0
+        skipped_count = 0
         
-        while True:
-            params['startIndex'] = start_index
-            data = self._make_request(url, params)
+        logger.info(f"获取到的原始CVE项数量: {len(cve_items) if cve_items else 0}")
+        
+        if cve_items:
+            # 创建日期范围对象
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=UTC, hour=23, minute=59, second=59)
             
-            if not data:
-                logger.error("获取最近CVE列表失败")
-                break
-            
-            # API 2.0版本的响应结构不同
-            cve_items = data.get('vulnerabilities', [])
-            total_results = data.get('totalResults', 0)
-            
-            if cve_items:
-                for item in cve_items:
-                    try:
-                        # 使用针对2.0版本的解析方法
-                        cve_data = self._parse_nvd_cve_item_v2(item.get('cve', {}))
-                        all_cves.append(cve_data)
-                        # 保存到数据库
-                        self._save_cve_to_db(cve_data)
-                    except Exception as e:
-                        logger.error(f"处理CVE项时出错: {str(e)}")
+            for item in cve_items:
+                try:
+                    # 使用针对2.0版本的解析方法，传递完整的item对象
+                    cve_data = self._parse_nvd_cve_item_v2(item)
+                    valid_count += 1
+                    
+                    # 检查ID是否有效
+                    if cve_data.get('id') == 'UNKNOWN':
+                        skipped_count += 1
                         continue
-                
-                # 检查是否还有更多结果
-                if start_index + len(cve_items) >= total_results:
-                    break
-                
-                start_index += len(cve_items)
-            else:
-                break
+                    
+                    # 检查是否在指定时间范围内（如果有日期）
+                    published_date = cve_data.get('published_date', '')
+                    if published_date:
+                        try:
+                            # 解析日期并添加时区
+                            if 'Z' in published_date:
+                                pub_date = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
+                            elif '+' in published_date or '-' in published_date.split('T')[1]:
+                                pub_date = datetime.fromisoformat(published_date)
+                            else:
+                                # 尝试多种格式解析
+                                try:
+                                    pub_date = datetime.fromisoformat(published_date).replace(tzinfo=UTC)
+                                except ValueError:
+                                    # 使用strptime尝试常见格式
+                                    formats = ['%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d']
+                                    pub_date = None
+                                    for fmt in formats:
+                                        try:
+                                            pub_date = datetime.strptime(published_date, fmt).replace(tzinfo=UTC)
+                                            break
+                                        except ValueError:
+                                            continue
+                                
+                                # 如果仍然无法解析，假设日期有效
+                                if pub_date is None:
+                                    pub_date = datetime.now(UTC)
+                        except Exception as e:
+                            logger.error(f"解析日期失败: {published_date}, 错误: {str(e)}")
+                            pub_date = datetime.now(UTC)
+                        
+                        # 简化日期比较逻辑，只比较日期部分
+                        try:
+                            # 提取日期部分（年月日）进行比较
+                            pub_date_only = pub_date.date()
+                            start_date_only = start_dt.date()
+                            end_date_only = end_dt.date()
+                            
+                            if start_date_only <= pub_date_only <= end_date_only:
+                                all_cves.append(cve_data)
+                                # 保存到数据库
+                                self._save_cve_to_db(cve_data)
+                                logger.debug(f"添加CVE: {cve_data.get('id')}, 严重性: {cve_data.get('severity')}")
+                            else:
+                                skipped_count += 1
+                        except Exception as e:
+                            logger.error(f"日期比较失败: {str(e)}")
+                            # 如果比较失败，仍然添加到列表中
+                            all_cves.append(cve_data)
+                            self._save_cve_to_db(cve_data)
+                    else:
+                        # 如果没有日期信息，仍然添加到列表中
+                        all_cves.append(cve_data)
+                        self._save_cve_to_db(cve_data)
+                        logger.debug(f"添加无日期CVE: {cve_data.get('id')}")
+                except Exception as e:
+                    logger.error(f"处理CVE项时出错: {str(e)}")
+                    skipped_count += 1
+                    continue
         
         # 缓存结果
         cache_helper.cache_data(cache_key, all_cves)
         
         logger.info(f"获取到 {len(all_cves)} 个最近的CVE漏洞")
         return all_cves
+        
+    def fetch_nvd_data(self, use_recent=True):
+        """从NVD获取CVE数据
+        
+        Args:
+            use_recent: 是否获取最近的CVE数据
+            
+        Returns:
+            List: CVE数据列表
+        """
+        if use_recent:
+            url = self.nvd_recent_feed_url
+        else:
+            year = datetime.now().year
+            url = self.nvd_year_feed_url_template.format(year)
+
+        try:
+            logger.info(f"Fetching data from: {url}")
+            # 设置合适的请求头
+            headers = {
+                'User-Agent': settings.get('APP.user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            }
+            
+            response = requests.get(url, stream=True, timeout=30, headers=headers)
+            response.raise_for_status()
+
+            with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as gz_file:
+                data = json.loads(gz_file.read().decode('utf-8'))
+                return data.get('vulnerabilities', [])
+        except Exception as e:
+            logger.error(f"Failed to fetch NVD data: {str(e)}")
+            return []
     
     def _save_cve_to_db(self, cve_data: Dict) -> bool:
         """将CVE信息保存到数据库
