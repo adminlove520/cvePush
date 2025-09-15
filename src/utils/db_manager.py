@@ -335,6 +335,23 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def get_vulnerabilities_by_date(self, date):
+        """根据日期获取漏洞信息"""
+        # 计算当天的日期范围
+        start_date = date
+        # 计算次日的日期
+        from datetime import datetime, timedelta
+        try:
+            date_obj = datetime.strptime(date, '%Y-%m-%d')
+            next_day = date_obj + timedelta(days=1)
+            end_date = next_day.strftime('%Y-%m-%d')
+        except ValueError:
+            logger.error(f"无效的日期格式: {date}")
+            return []
+        
+        # 调用已有的日期范围查询方法
+        return self.get_vulnerabilities_by_date_range(start_date, end_date)
+
 # 创建默认实例
 db_manager = DatabaseManager()
 

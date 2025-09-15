@@ -186,5 +186,28 @@ class CacheHelper:
             size_bytes /= 1024.0
         return f"{size_bytes:.2f} PB"
 
+    @staticmethod
+    def get_cached_data(cache_key):
+        """根据缓存键获取缓存数据"""
+        try:
+            # 使用默认缓存目录
+            cache_dir = settings.get('CACHE.cache_dir', '.cache')
+            cache_file = os.path.join(cache_dir, f"{cache_key}.json")
+            cache_timeout = settings.get('CACHE.cache_timeout', 3600)
+            
+            # 检查缓存是否有效
+            if CacheHelper.is_cache_valid(cache_file, cache_timeout):
+                logger.debug(f"从缓存获取数据: {cache_file}")
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        import json
+                        return json.load(f)
+                except Exception as e:
+                    logger.error(f"读取缓存文件失败: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"获取缓存数据失败: {str(e)}")
+            return None
+
 # 创建默认实例
 cache_helper = CacheHelper()

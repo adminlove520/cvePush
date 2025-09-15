@@ -125,12 +125,7 @@ jobs:
           name: cveflows-log
           path: cveflows.log
 
-      - name: Upload updated DB
-        uses: actions/upload-artifact@v4
-        with:
-          name: vulns-db
-          path: data/db/vulns.db  # 上传当前数据库
-          retention-days: 7
+      # 数据库已经在前面的步骤中上传，此处省略重复上传
           
       - name: Upload daily vulnerability report
         if: env.new_vulns == 'true'
