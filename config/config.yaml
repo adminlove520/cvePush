@@ -1,11 +1,11 @@
 API:
   github:
-    token: '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'
+    token: 'YOUR_GITHUB_TOKEN_HERE'
 NOTIFICATION:
   dingtalk:
     enabled: true
-    secret_key: 'SEC55720f74e664fec45b34bf2eb47a4ffbd7a560aa3abd5c41c1c4b06f7b01bcab'
-    webhook_url: 'https://oapi.dingtalk.com/robot/send?access_token=917e87f96be40a493e9bd84579a8a790979d7090344bc673be71ad7e28f7854f'
+    secret_key: 'YOUR_DINGTALK_SECRET_HERE'
+    webhook_url: 'YOUR_DINGTALK_WEBHOOK_HERE'
   email:
     enabled: false
     password: ''
