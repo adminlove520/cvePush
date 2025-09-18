@@ -1,0 +1,75 @@
+# GitHub Actions workflow for daily incremental CVE data sync to database
+
+name: Daily Incremental CVE Sync
+
+on:
+  # 每天执行增量数据同步
+  schedule:
+    - cron: '30 15 * * *'  # 每天UTC时间15:30执行（北京时间23:30）
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '获取过去几天的漏洞数据（默认1天）'
+        required: false
+        type: number
+        default: 1
+
+jobs:
+  sync-daily-incremental-data:
+    name: 每日增量数据同步到数据库
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: 'pip'
+          
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          
+      - name: Ensure data directories exist
+        run: |
+          mkdir -p data/db
+          mkdir -p data/cache
+          mkdir -p logs
+          
+      - name: Sync daily incremental data to database
+        id: sync-data
+        env:
+          DAYS: ${{ inputs.days || 1 }}
+        run: |
+          echo "开始同步过去${DAYS}天的增量CVE数据到数据库"
+          
+          # 创建一个简单的脚本来执行增量数据同步
+          cat > sync_incremental.py << 'EOF'
+          import os
+          import sys
+          import logging
+          from datetime import datetime, timedelta
+          from src.core.cve_collector import cve_collector
+          from src.config import setup_logging
+          
+          # 设置日志
+          setup_logging(log_level='INFO', log_file='logs/incremental_sync.log')
+          logger = logging.getLogger(__name__)
+          
+          def sync_incremental_data(days):
+              """同步过去指定天数的增量CVE数据到数据库"""
+              try:
+                  logger.info(f"开始同步过去{days}天的增量CVE数据")
+                  
+                  # 获取最近的CVE数据
+                  recent_cves = cve_collector.get_recent_cves(days=days)
+                  
+                  if recent_cves:
+                      logger.info(f"成功同步 {len(recent_cves)} 条增量CVE数据到数据库")
+                      # 写入标记文件，指示有新漏洞数据
+                      with open('data/new_vulns.flag', 'w') as f:
+                          f.write(f"{{\n  \"sync_time\": \"{datetime.now().isoformat()}\
