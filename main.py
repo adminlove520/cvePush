@@ -99,16 +99,16 @@ def process_daily_vulns() -> None:
         logger.info("开始处理当日漏洞")
         
         # 执行每日检查
-        processed_vulns = poc_monitor.run_daily_check()
+        processed_count = poc_monitor.run_daily_check()
         
         # 生成每日报告
         report_path = poc_monitor.generate_daily_report()
         
-        logger.info(f"当日漏洞处理完成，共处理 {len(processed_vulns)} 个漏洞")
+        logger.info(f"当日漏洞处理完成，共处理 {processed_count} 个漏洞")
         
         # 输出处理结果摘要
         print(f"\n当日漏洞处理结果摘要:")
-        print(f"共处理漏洞数量: {len(processed_vulns)}")
+        print(f"共处理漏洞数量: {processed_count}")
         if report_path:
             print(f"每日报告已生成: {report_path}")
     except Exception as e:

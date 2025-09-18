@@ -419,11 +419,31 @@ class CVEProcessor:
             content_parts = []
             content_parts.append(f"漏洞ID: {cve_id}")
             
+            # 添加发布时间并转换为本地时间(UTC+8)
+            if 'published_date' in cve_data and cve_data['published_date']:
+                try:
+                    # 解析UTC时间
+                    utc_time = date_helper.parse_datetime(cve_data['published_date'])
+                    if utc_time:
+                        # 转换为CST时间(UTC+8)
+                        cst_time = utc_time.replace(tzinfo=UTC).astimezone()
+                        # 格式化显示
+                        formatted_time = cst_time.strftime('%Y-%m-%d %H:%M:%S')
+                        content_parts.append(f"发布时间: {formatted_time}")
+                except Exception as e:
+                    logger.warning(f"转换发布时间时发生错误: {str(e)}")
+                    # 如果转换失败，使用原始时间
+                    content_parts.append(f"发布时间: {cve_data['published_date']}")
+            
             if 'severity_level' in cve_data:
                 content_parts.append(f"严重性: {cve_data['severity_level']}")
             
             if 'cvss_score' in cve_data and cve_data['cvss_score']:
                 content_parts.append(f"CVSS评分: {cve_data['cvss_score']}")
+            
+            # 添加攻击向量
+            if 'cvss_vector' in cve_data and cve_data['cvss_vector']:
+                content_parts.append(f"攻击向量: {cve_data['cvss_vector']}")
             
             # 使用简短描述
             description = cve_data.get('description', '暂无描述')
@@ -434,11 +454,30 @@ class CVEProcessor:
             # 限制描述长度
             if len(description) > 200:
                 description = description[:200] + '...'
-            content_parts.append(f"描述: {description}")
+            content_parts.append(f"漏洞描述: {description}")
             
-            # 添加报告路径（如果有）
-            if 'report_path' in cve_data:
-                content_parts.append(f"报告路径: {cve_data['report_path']}")
+            # 添加相关链接
+            if 'references' in cve_data and cve_data['references']:
+                for ref in cve_data['references'][:1]:  # 只显示第一个链接
+                    if isinstance(ref, dict) and 'url' in ref:
+                        content_parts.append(f"相关链接: {ref['url']}")
+                        break
+            
+            # 添加来源
+            if 'source' in cve_data and cve_data['source']:
+                content_parts.append(f"来源: {cve_data['source']}")
+            
+            # 添加漏洞分类
+            if 'severity_level' in cve_data:
+                severity_mapping = {
+                    'Critical': '严重',
+                    'High': '高',
+                    'Medium': '中',
+                    'Low': '低',
+                    'None': '无'
+                }
+                chinese_severity = severity_mapping.get(cve_data['severity_level'], cve_data['severity_level'])
+                content_parts.append(f"漏洞分类: {chinese_severity}")
             
             # 构建完整内容
             content = '\n'.join(content_parts)

@@ -196,10 +196,10 @@ class CacheHelper:
     def get_cached_data(cache_key):
         """根据缓存键获取缓存数据"""
         try:
-            # 使用默认缓存目录
-            cache_dir = settings.get('CACHE.cache_dir', '.cache')
+            # 使用默认缓存目录，与cache_data方法保持一致
+            cache_dir = settings.get('CACHE.dir', os.path.join('data', 'cache'))
             cache_file = os.path.join(cache_dir, f"{cache_key}.json")
-            cache_timeout = settings.get('CACHE.cache_timeout', 3600)
+            cache_timeout = settings.get('CACHE.ttl', 3600)
             
             # 检查缓存是否有效
             if CacheHelper.is_cache_valid(cache_file, cache_timeout):
