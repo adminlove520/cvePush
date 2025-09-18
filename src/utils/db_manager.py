@@ -104,17 +104,67 @@ class DatabaseManager:
         finally:
             conn.close()
     
-    def is_new_vuln(self, vuln_id):
-        """检查漏洞是否是新漏洞（数据库中不存在）"""
+    def is_new_vuln(self, vuln_id, published_date=None):
+        """检查漏洞是否是新漏洞
+        
+        Args:
+            vuln_id: 漏洞ID
+            published_date: 漏洞发布日期（可选）
+            
+        Returns:
+            bool: 是否是新漏洞
+        """
         conn = self.connect()
         if not conn:
             return False
         
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM vulns WHERE id=?", (vuln_id,))
-            exists = cursor.fetchone() is not None
-            return not exists
+            
+            # 首先检查漏洞是否存在
+            cursor.execute("SELECT published_date FROM vulns WHERE id=?", (vuln_id,))
+            row = cursor.fetchone()
+            
+            # 如果漏洞不存在，肯定是新漏洞
+            if not row:
+                return True
+            
+            # 如果提供了发布日期，检查该漏洞是否是近期发布的
+            # 只有近期发布的漏洞才应该被视为"新"漏洞并触发通知
+            if published_date:
+                try:
+                    # 解析发布日期
+                    if 'Z' in published_date:
+                        pub_date = datetime.fromisoformat(published_date.replace('Z', '+00:00'))
+                    elif '+' in published_date or '-' in published_date.split('T')[1]:
+                        pub_date = datetime.fromisoformat(published_date)
+                    else:
+                        # 尝试多种格式解析
+                        try:
+                            pub_date = datetime.fromisoformat(published_date).replace(tzinfo=UTC)
+                        except ValueError:
+                            # 使用strptime尝试常见格式
+                            formats = ['%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d']
+                            pub_date = None
+                            for fmt in formats:
+                                try:
+                                    pub_date = datetime.strptime(published_date, fmt).replace(tzinfo=UTC)
+                                    break
+                                except ValueError:
+                                    continue
+                except Exception as e:
+                    logger.warning(f"解析发布日期失败: {published_date}, 错误: {str(e)}")
+                    return False
+                
+                # 如果成功解析了发布日期，检查是否在24小时内
+                if pub_date:
+                    # 计算24小时前的时间点
+                    one_day_ago = datetime.now(UTC) - timedelta(days=1)
+                    # 只对24小时内发布的漏洞触发通知
+                    return pub_date >= one_day_ago
+            
+            # 如果没有提供发布日期或者日期解析失败，则认为不是新漏洞
+            return False
         except Exception as e:
             logger.error(f"检查漏洞是否存在时出错: {str(e)}")
             return False

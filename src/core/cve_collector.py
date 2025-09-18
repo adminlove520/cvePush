@@ -437,9 +437,9 @@ class CVECollector:
         Returns:
             List[Dict]: CVE信息列表
         """
-        # 确定日期范围
+        # 确定日期范围 - 统一使用UTC时间
         if not start_date:
-            end = datetime.now() if not end_date else datetime.strptime(end_date, '%Y-%m-%d')
+            end = datetime.now(UTC) if not end_date else datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=UTC)
             start = end - timedelta(days=days)
             start_date = start.strftime('%Y-%m-%d')
             if not end_date:
@@ -447,8 +447,9 @@ class CVECollector:
         
         logger.info(f"日期范围: {start_date} 到 {end_date}")
         
-        # 检查缓存
-        cache_key = f'recent_cves_{start_date}_{end_date}'
+        # 检查缓存 - 添加当前小时到缓存键，确保每小时更新
+        current_hour = datetime.now(UTC).strftime('%Y%m%d%H')
+        cache_key = f'recent_cves_{start_date}_{end_date}_{current_hour}'
         cached_data = cache_helper.get_cached_data(cache_key)
         if cached_data:
             logger.debug(f"从缓存获取最近CVE列表: {start_date} 到 {end_date}")
@@ -502,10 +503,10 @@ class CVECollector:
                                             break
                                         except ValueError:
                                             continue
-                                
-                                # 如果仍然无法解析，假设日期有效
-                                if pub_date is None:
-                                    pub_date = datetime.now(UTC)
+                                    
+                                    # 如果仍然无法解析，假设日期有效
+                                    if pub_date is None:
+                                        pub_date = datetime.now(UTC)
                         except Exception as e:
                             logger.error(f"解析日期失败: {published_date}, 错误: {str(e)}")
                             pub_date = datetime.now(UTC)
@@ -645,6 +646,7 @@ class CVECollector:
             
             # 处理每条CVE数据
             cve_list = year_data.get('data', [])
+            processed_count = 0
             for item in cve_list:
                 try:
                     cve_data = self._parse_nvd_cve_item_v2(item)
@@ -662,6 +664,14 @@ class CVECollector:
                     
                     # 添加到表格行
                     md_content.append(f"| {cve_id} | {published_date} | {severity} | {cvss_score} | {description} |")
+                    
+                    # 将数据保存到数据库
+                    self._save_cve_to_db(cve_data)
+                    processed_count += 1
+                    
+                    # 每处理100个记录记录一次日志
+                    if processed_count % 100 == 0:
+                        logger.info(f"已处理 {processed_count}/{len(cve_list)} 条CVE数据")
                 except Exception as e:
                     logger.warning(f"处理CVE数据时出错: {str(e)}")
                     continue
@@ -671,6 +681,7 @@ class CVECollector:
             
             if success:
                 logger.info(f"全量CVE数据已保存到: {file_path}")
+                logger.info(f"共处理并保存了 {processed_count} 条CVE数据到数据库")
                 return file_path
             else:
                 logger.error(f"保存全量CVE数据失败")
@@ -689,8 +700,13 @@ class CVECollector:
             bool: 是否保存成功
         """
         try:
-            # 检查是否已存在
-            if db_manager.is_new_vuln(cve_data['id']):
+            # 检查是否已存在，同时传递发布日期进行新漏洞判断
+            is_new = db_manager.is_new_vuln(cve_data['id'], cve_data.get('published_date'))
+            
+            # 更新cve_data中的is_new字段
+            cve_data['is_new'] = is_new
+            
+            if is_new:
                 # 准备数据
                 vuln_data = (
                     cve_data['id'],
@@ -709,10 +725,10 @@ class CVECollector:
                 
                 # 保存到数据库
                 db_manager.save_vuln(*vuln_data)
-                logger.debug(f"已保存CVE信息到数据库: {cve_data['id']}")
+                logger.debug(f"已保存新的CVE信息到数据库: {cve_data['id']}")
                 return True
             else:
-                logger.debug(f"CVE信息已存在于数据库: {cve_data['id']}")
+                logger.debug(f"CVE信息已存在于数据库或不是新发布的: {cve_data['id']}")
                 return True
         except Exception as e:
             logger.error(f"保存CVE信息到数据库失败: {str(e)}")

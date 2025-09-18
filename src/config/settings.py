@@ -42,7 +42,34 @@ class Settings:
         'POC_MONITOR': {
             'enabled': True,
             'sources': [
-                'nvd', 'github', 'exploit_db', 'cve_detail'
+                {
+                    'name': 'Poc-Monitor_v1.0.1_update',
+                    'url': 'https://raw.githubusercontent.com/adminlove520/Poc-Monitor_v1.0.1/main/update.json',
+                    'priority': 1,
+                    'enabled': True,
+                    'type': 'json'
+                },
+                {
+                    'name': 'Poc-Monitor_v1.0.1_daily',
+                    'url': 'https://raw.githubusercontent.com/adminlove520/Poc-Monitor_v1.0.1/main/dateLog/{date}.json',
+                    'priority': 2,
+                    'enabled': True,
+                    'type': 'json'
+                },
+                {
+                    'name': 'PocOrExp_Today',
+                    'url': 'https://github.com/ycdxsb/PocOrExp_in_Github/blob/main/Today.md',
+                    'priority': 3,
+                    'enabled': True,
+                    'type': 'markdown'
+                },
+                {
+                    'name': 'PocOrExp_2025',
+                    'url': 'https://github.com/ycdxsb/PocOrExp_in_Github/blob/main/2025/README.md',
+                    'priority': 4,
+                    'enabled': True,
+                    'type': 'markdown'
+                }
             ],
             'check_interval': 3600,  # 检查间隔（秒）
             'new_vulns_flag': 'data/new_vulns.flag',
@@ -96,9 +123,9 @@ class Settings:
                 'recipients': []
             },
             'dingtalk': {
-                'enabled': False,
-                'webhook_url': '',
-                'secret_key': ''
+                'enabled': True,
+                'webhook_url': 'https://oapi.dingtalk.com/robot/send?access_token=917e87f96be40a493e9bd84579a8a790979d7090344bc673be71ad7e28f7854f',
+                'secret_key': 'SEC55720f74e664fec45b34bf2eb47a4ffbd7a560aa3abd5c41c1c4b06f7b01bcab'
             },
             'wechat_work': {
                 'enabled': False,
@@ -134,6 +161,9 @@ class Settings:
         Args:
             config_file: 配置文件路径
         """
+        # 设置BASE_DIR属性
+        self.BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        
         # 初始化配置为默认配置的深拷贝
         self._settings = copy.deepcopy(self.DEFAULT_SETTINGS)
         

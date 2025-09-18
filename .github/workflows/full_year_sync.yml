@@ -1,24 +1,28 @@
-name: FullYearDataSync
+# GitHub Actions workflow for syncing full year CVE data to database and daily incremental sync
+
+name: CVE Data Synchronization
 
 on:
+  # 全量数据同步 - 每周日执行一次
   schedule:
-    - cron: '40 15 * * *'  # 每天UTC时间15:40执行（北京时间23:40）
-  workflow_dispatch:     # 支持手动触发
+    - cron: '40 15 * * 0'  # 每周日UTC时间15:40执行（北京时间23:40）
+  workflow_dispatch:
     inputs:
       year:
         description: '指定要同步数据的年份（留空则同步当前年份）'
         required: false
         type: number
       force_update:
-        description: '是否强制更新已存在的数据文件'
+        description: '是否强制更新已存在的数据'
         required: false
         type: boolean
         default: false
 
 jobs:
   sync-full-year-data:
+    name: 全量数据同步到数据库
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # 设置超时时间为60分钟，防止长时间运行
+    timeout-minutes: 120  # 增加超时时间以处理大量数据
     
     steps:
       - name: Checkout repository
@@ -38,6 +42,7 @@ jobs:
         run: |
           mkdir -p data/db
           mkdir -p data/cache
+          mkdir -p logs
           
       - name: Get current time
         uses: gerred/actions/current-time@master
@@ -51,61 +56,60 @@ jobs:
         run: |
           echo "CURRENT_YEAR=${TIME}" >> $GITHUB_ENV
       
-      - name: Check if file already exists
-        id: check-file
-        env:
-          YEAR: ${{ inputs.year || env.CURRENT_YEAR }}
-        run: |
-          FILE_PATH="data/db/nvdData_${YEAR}.md"
-          if [ -f "$FILE_PATH" ]; then
-            echo "file_exists=true" >> $GITHUB_ENV
-            echo "File $FILE_PATH already exists."
-          else
-            echo "file_exists=false" >> $GITHUB_ENV
-            echo "File $FILE_PATH does not exist."
-          fi
-          
-      - name: Sync full year data
+      - name: Sync full year data to database
         id: sync-data
         env:
           YEAR: ${{ inputs.year || env.CURRENT_YEAR }}
         run: |
-          # 如果文件已存在且不是强制更新，则跳过
-          if [ "${{ env.file_exists }}" = "true" ] && [ "${{ inputs.force_update }}" = "false" ]; then
-            echo "File already exists and force_update is false. Skipping data sync."
-            echo "skipped=true" >> $GITHUB_ENV
-            exit 0
-          fi
-
+          echo "开始同步${YEAR}年全量CVE数据到数据库"
+          
           # 准备命令参数
           CMD_ARGS="full-year"
           if [ -n "$YEAR" ]; then
             CMD_ARGS="$CMD_ARGS --year $YEAR"
           fi
 
-          echo "Running command: python main.py $CMD_ARGS"
+          echo "运行命令: python main.py $CMD_ARGS"
           python main.py $CMD_ARGS
 
           # 检查执行结果
           if [ $? -eq 0 ]; then
             echo "sync_success=true" >> $GITHUB_ENV
-            echo "Data sync completed successfully."
+            echo "全量数据同步到数据库成功"
           else
             echo "sync_success=false" >> $GITHUB_ENV
-            echo "Data sync failed." >&2
+            echo "全量数据同步到数据库失败" >&2
             exit 1
           fi
           
-      - name: Upload data file as artifact
+      - name: Verify database records
         if: env.sync_success == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-year-data-${{ inputs.year || env.CURRENT_YEAR }}
-          path: data/db/nvdData_*.md
-          retention-days: 30
+        run: |
+          echo "正在验证数据库记录..."
+          # 创建一个简单的脚本来检查数据库中的记录数
+          cat > verify_db.py << 'EOF'
+          import sqlite3
+          import os
+          
+          # 连接数据库
+          db_path = os.path.join('data', 'cve_data.db')
+          conn = sqlite3.connect(db_path)
+          cursor = conn.cursor()
+          
+          # 查询记录数
+          cursor.execute("SELECT COUNT(*) FROM vulns")
+          count = cursor.fetchone()[0]
+          
+          print(f"数据库中当前有 {count} 条漏洞记录")
+          
+          # 关闭连接
+          conn.close()
+          EOF
+          
+          python verify_db.py
           
       - name: Log failure
         if: failure()
         run: |
-          echo "Full year data sync failed for year ${{ inputs.year || env.CURRENT_YEAR }}"
-          echo "Please check the workflow logs for details."
+          echo "全量数据同步失败，年份: ${{ inputs.year || env.CURRENT_YEAR }}"
+          echo "请检查工作流日志获取详细信息"
